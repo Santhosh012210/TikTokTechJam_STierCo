@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+
+rec_datasets/KuaiRand-Pure/
+rec_datasets/WM_KuaiRand/
+rec_datasets/WeChat_data/
+rec_datasets/WM_WeChat/
