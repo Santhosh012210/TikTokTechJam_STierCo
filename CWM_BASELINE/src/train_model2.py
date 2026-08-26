@@ -86,7 +86,8 @@ class Learner2(object):
         input_train = Wrap_Dataset2(make_feature(self.train_dat, self.dat_name),
                                 self.train_dat['play_time_truncate'].tolist(),
                                 self.train_dat['duration_ms'].tolist(),
-                                self.train_dat['duration_ms'].tolist())
+                                self.train_dat['duration_ms'].tolist(),
+                                use_cuda=self.use_cuda)
         train_loader = DataLoader(input_train, 
                                         batch_size=self.batch_size, 
                                         shuffle=True)
@@ -95,7 +96,8 @@ class Learner2(object):
         input_vali = Wrap_Dataset2(make_feature(self.vali_dat, self.dat_name),
                                 self.vali_dat['play_time_truncate'].tolist(),
                                 self.vali_dat['duration_ms'].tolist(),
-                                self.vali_dat['duration_ms'].tolist())
+                                self.vali_dat['duration_ms'].tolist(),
+                                use_cuda=self.use_cuda)
         vali_loader = DataLoader(input_vali, 
                                         batch_size=2048, 
                                         shuffle=False)
@@ -104,7 +106,8 @@ class Learner2(object):
         input_test = Wrap_Dataset2(make_feature(self.test_dat, self.dat_name),
                                 self.test_dat['play_time_truncate'].tolist(),
                                 self.test_dat['duration_ms'].tolist(),
-                                self.test_dat['duration_ms'].tolist())
+                                self.test_dat['duration_ms'].tolist(),
+                                use_cuda=self.use_cuda)
         test_loader = DataLoader(input_test, 
                                         batch_size=2048, 
                                         shuffle=False)
@@ -238,8 +241,9 @@ class Learner2(object):
         import copy
         usr_model = copy.deepcopy(model)
 
-        model = model.cuda()
-        usr_model = usr_model.cuda()
+        if self.use_cuda:
+            model = model.cuda()
+            usr_model = usr_model.cuda()
 
         model.load_state_dict(torch.load(self.fout + '_temp_checkpoint.pt'))
         usr_model.load_state_dict(torch.load(self.fout + '_temp_usr_checkpoint.pt'))

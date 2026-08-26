@@ -6,3 +6,10 @@ rec_datasets/KuaiRand-Pure/
 rec_datasets/WM_KuaiRand/
 rec_datasets/WeChat_data/
 rec_datasets/WM_WeChat/
+.DS_Store
+.vscode/
+**/rec_datasets/**/*.csv
+**/KuaiRand-Pure/data/
+src/test_run*
+__pycache__/
+*.pyc

@@ -1,0 +1,8 @@
+.DS_Store
+.vscode/
+**/rec_datasets/**/*.csv
+**/KuaiRand-Pure/data/
+**/KuaiRand-Pure
+src/test_run*
+__pycache__/
+*.pyc
