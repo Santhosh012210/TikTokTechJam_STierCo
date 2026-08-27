@@ -5,6 +5,7 @@ No logic beyond loading and validation.
 """
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -21,7 +22,14 @@ def _load_dotenv(path: Path) -> None:
             continue
         k, _, v = line.partition("=")
         k = k.strip()
-        v = v.strip().strip('"').strip("'")
+        try:
+            # Support shell-style quoted values and ignore unquoted inline comments.
+            parts = shlex.split(v.strip(), comments=True, posix=True)
+        except ValueError as exc:
+            raise ValueError(f"Invalid .env value for {k}: {exc}") from exc
+        if not parts:
+            continue
+        v = " ".join(parts)
         if k not in os.environ:          # env var takes precedence over .env
             os.environ[k] = v
 
@@ -67,19 +75,7 @@ class Config:
 
     SEED:    int   = 42
     UCB_C:   float = 1.414
-    MODEL_ID: str  = "claude-haiku-4-5-20251001"
     PYTHON_EXE: str = sys.executable
-
-    @property
-    def api_key(self) -> str:
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not key:
-            raise EnvironmentError(
-                "ANTHROPIC_API_KEY is not set. "
-                "Either export it or add it to .env at the project root."
-            )
-        return key
-
 
 def load_config() -> Config:
     cfg = Config()
@@ -119,9 +115,6 @@ def load_config() -> Config:
     )
     if venv_py.exists():
         cfg.PYTHON_EXE = str(venv_py)
-
-    # Override model from env if set
-    cfg.MODEL_ID = os.environ.get("ANTHROPIC_MODEL", cfg.MODEL_ID)
 
     return cfg
 

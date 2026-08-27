@@ -23,6 +23,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from harness.builder import BuilderResult, run_builder_session
 from harness.config import Config, load_config
 from harness.logger import RunLogger
+from harness.provider import validate_provider_environment
 from harness.strategist import run_strategist_session
 from harness.tree import SearchTree
 from harness.validator import scan_candidate_source
@@ -285,8 +286,8 @@ def main() -> None:
     if args.data_dir:
         config.DATA_DIR = Path(args.data_dir)
 
-    # Verify API key is available before we do any work
-    _ = config.api_key
+    # Fail before creating run files if the selected provider is misconfigured.
+    provider_info = validate_provider_environment()
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     logger = RunLogger(config.ARTIFACTS_DIR, run_id)
@@ -294,6 +295,7 @@ def main() -> None:
     run_workspace.mkdir(parents=True, exist_ok=True)
     print(f"[harness] run_id={run_id}  log={logger.path}")
     print(f"[harness] workspace={run_workspace}")
+    print(f"[harness] provider={provider_info['provider']}  model={provider_info['model']}")
     print(f"[harness] budget: {config.ITERATION_BUDGET} iters / {args.wall_hours}h / builder_turns={config.BUILDER_MAX_TURNS}")
     print(f"[harness] baseline primary={config.BASELINE_PRIMARY:.4f}  oracle={config.ORACLE_PRIMARY:.4f}  headroom={config.HEADROOM:.4f}")
 

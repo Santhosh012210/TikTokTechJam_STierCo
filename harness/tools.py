@@ -86,13 +86,21 @@ BUILDER_TOOLS = [
 # ---------------------------------------------------------------------------
 
 _SECRET_PATTERN = re.compile(r"sk-ant-[A-Za-z0-9\-_]{10,}")
+_SECRET_ENV_KEYS = {
+    "LLM_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GROQ_API_KEY",
+    "GEMINI_API_KEY",
+    "OPENAI_API_KEY",
+}
 
 
 def redact_secrets(text: str) -> str:
     """Remove API key values from any string before logging or returning to model."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if api_key and api_key in text:
-        text = text.replace(api_key, "<REDACTED>")
+    for key_name in _SECRET_ENV_KEYS:
+        api_key = os.environ.get(key_name, "")
+        if api_key and api_key in text:
+            text = text.replace(api_key, "<REDACTED>")
     text = _SECRET_PATTERN.sub("<REDACTED>", text)
     return text
 
@@ -169,7 +177,7 @@ def exec_run_bash(
                 )
 
         # Build subprocess environment: full PATH, PYTHONPATH set, no API key
-        env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+        env = {k: v for k, v in os.environ.items() if k not in _SECRET_ENV_KEYS}
         pythonpath = str(starter_kit_root)
         if "PYTHONPATH" in env:
             pythonpath = pythonpath + os.pathsep + env["PYTHONPATH"]

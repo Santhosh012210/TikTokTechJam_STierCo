@@ -90,12 +90,63 @@ notepad .env
 cp .env.example .env
 ```
 
-Enable one provider block in `.env`. For example, Groq uses:
+Enable exactly one provider block in `.env`. Every hosted provider uses the same
+variable names. For example, Groq uses:
 
 ```dotenv
 LLM_PROVIDER=groq
-GROQ_API_KEY=gsk_your_key_here
+LLM_API_KEY=gsk_your_key_here
 ```
+
+Current provider examples—copy one only:
+
+Anthropic:
+
+```dotenv
+LLM_PROVIDER=anthropic
+LLM_API_KEY=sk-ant-your-key-here
+```
+
+Default model: `claude-haiku-4-5-20251001`.
+
+Groq:
+
+```dotenv
+LLM_PROVIDER=groq
+LLM_API_KEY=gsk_your_key_here
+```
+
+Default model: `llama-3.3-70b-versatile`.
+
+Google Gemini:
+
+```dotenv
+LLM_PROVIDER=gemini
+LLM_API_KEY=your-gemini-key-here
+```
+
+Default model: `gemini-2.0-flash`.
+
+OpenAI:
+
+```dotenv
+LLM_PROVIDER=openai
+LLM_API_KEY=sk-your-openai-key-here
+```
+
+Default model: `gpt-4o-mini`.
+
+Ollama:
+
+```dotenv
+LLM_PROVIDER=ollama
+```
+
+Default model: `llama3.2`; no API key is required.
+
+`LLM_MODEL` is optional. When omitted, the harness chooses the default shown for the
+selected provider. Set it only to override that default. `LLM_BASE_URL` is also optional;
+it is mainly useful for a custom Ollama endpoint or another compatible gateway.
 
 The `.env` file is ignored by Git. Never commit API keys.
 
@@ -180,7 +231,9 @@ python baseline_kuairand-starter-kit/submit.py submission.csv \
 
 ## Provider switching
 
-Switch providers by editing `.env`; no source changes are needed. Optionally set `LLM_MODEL` to override the provider's default model. Provider-specific code is isolated in `harness/provider.py`.
+Switch providers by changing `LLM_PROVIDER` and `LLM_API_KEY`; no source changes are
+needed. Optionally set `LLM_MODEL` or `LLM_BASE_URL` to override the selected provider's
+defaults. Provider-specific code is isolated in `harness/provider.py`.
 
 ## Troubleshooting
 
@@ -198,7 +251,8 @@ Check the dataset location and integrity. Re-download the archive if files are m
 
 ### Provider API key is missing
 
-Confirm that `.env` exists at the repository root and contains `LLM_PROVIDER` plus the matching provider key.
+Confirm that `.env` exists at the repository root and contains `LLM_PROVIDER` plus
+`LLM_API_KEY`. Ollama is the only provider that does not require `LLM_API_KEY`.
 
 ### Ollama connection refused
 

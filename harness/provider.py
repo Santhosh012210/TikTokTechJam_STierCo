@@ -1,13 +1,14 @@
 """LLM provider abstraction — the only file that knows about any specific SDK.
 
 Switch providers by setting LLM_PROVIDER in .env:
-  LLM_PROVIDER=anthropic   → ANTHROPIC_API_KEY, model defaults to claude-haiku-4-5-20251001
-  LLM_PROVIDER=groq        → GROQ_API_KEY,      model defaults to llama-3.3-70b-versatile
-  LLM_PROVIDER=gemini      → GEMINI_API_KEY,     model defaults to gemini-2.0-flash
-  LLM_PROVIDER=ollama      → no key needed,      model defaults to llama3.2
-  LLM_PROVIDER=openai      → OPENAI_API_KEY,     model defaults to gpt-4o-mini
+  LLM_PROVIDER=anthropic   → model defaults to claude-haiku-4-5-20251001
+  LLM_PROVIDER=groq        → model defaults to llama-3.3-70b-versatile
+  LLM_PROVIDER=gemini      → model defaults to gemini-2.0-flash
+  LLM_PROVIDER=ollama      → model defaults to llama3.2
+  LLM_PROVIDER=openai      → model defaults to gpt-4o-mini
 
-Set LLM_MODEL in .env to override the model for any provider.
+Hosted providers use the generic LLM_API_KEY. Set LLM_MODEL or LLM_BASE_URL
+to override the selected provider's defaults.
 
 builder.py and strategist.py import only from this file — never from a vendor SDK.
 """
@@ -206,35 +207,35 @@ class OpenAICompatClient(LLMClient):
 
 _PROVIDER_DEFAULTS: dict[str, dict] = {
     "anthropic": {
-        "key_env":  "ANTHROPIC_API_KEY",
+        "requires_api_key": True,
         "model":    "claude-haiku-4-5-20251001",
         "base_url": None,
     },
     "groq": {
-        "key_env":  "GROQ_API_KEY",
+        "requires_api_key": True,
         "model":    "llama-3.3-70b-versatile",
         "base_url": "https://api.groq.com/openai/v1",
     },
     "gemini": {
-        "key_env":  "GEMINI_API_KEY",
+        "requires_api_key": True,
         "model":    "gemini-2.0-flash",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
     },
     "ollama": {
-        "key_env":  None,
+        "requires_api_key": False,
         "model":    "llama3.2",
         "base_url": "http://localhost:11434/v1",
     },
     "openai": {
-        "key_env":  "OPENAI_API_KEY",
+        "requires_api_key": True,
         "model":    "gpt-4o-mini",
         "base_url": None,
     },
 }
 
 
-def make_client() -> LLMClient:
-    """Instantiate the correct LLMClient based on LLM_PROVIDER env var."""
+def _resolve_provider_settings() -> tuple[str, str, str, str | None]:
+    """Resolve and validate the selected provider without importing an SDK."""
     provider = os.environ.get("LLM_PROVIDER", "anthropic").lower()
     if provider not in _PROVIDER_DEFAULTS:
         raise ValueError(
@@ -243,17 +244,30 @@ def make_client() -> LLMClient:
         )
 
     defaults = _PROVIDER_DEFAULTS[provider]
-    model    = os.environ.get("LLM_MODEL", defaults["model"])
-    base_url = os.environ.get("LLM_BASE_URL", defaults["base_url"] or "")  or defaults["base_url"]
+    model = os.environ.get("LLM_MODEL") or defaults["model"]
+    base_url = os.environ.get("LLM_BASE_URL") or defaults["base_url"]
 
-    # Resolve API key
-    key_env = defaults["key_env"]
-    api_key = os.environ.get(key_env, "") if key_env else "ollama"
-    if key_env and not api_key:
+    api_key = os.environ.get("LLM_API_KEY", "")
+    if defaults["requires_api_key"] and not api_key:
         raise EnvironmentError(
-            f"LLM_PROVIDER={provider} requires {key_env} to be set "
+            f"LLM_PROVIDER={provider} requires LLM_API_KEY to be set "
             "(in .env or environment)."
         )
+    if not api_key:
+        api_key = "ollama"  # OpenAI-compatible clients require a non-empty value.
+
+    return provider, api_key, model, base_url or None
+
+
+def validate_provider_environment() -> dict[str, str | None]:
+    """Fail fast on invalid provider configuration, without exposing the key."""
+    provider, _api_key, model, base_url = _resolve_provider_settings()
+    return {"provider": provider, "model": model, "base_url": base_url}
+
+
+def make_client() -> LLMClient:
+    """Instantiate the correct LLMClient based on LLM_PROVIDER env var."""
+    provider, api_key, model, base_url = _resolve_provider_settings()
 
     if provider == "anthropic":
         return AnthropicClient(api_key=api_key, model=model)
