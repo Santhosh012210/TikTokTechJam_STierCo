@@ -20,13 +20,14 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from harness.builder import BuilderResult, run_builder_session
 from harness.config import Config, load_config
 from harness.logger import RunLogger
 from harness.provider import validate_provider_environment
-from harness.strategist import run_strategist_session
-from harness.tree import SearchTree
 from harness.validator import scan_candidate_source
+from research_agent.builder import BuilderResult, run_builder_session
+from research_agent.knowledge import list_methods
+from research_agent.search.tree import SearchTree
+from research_agent.strategist import run_strategist_session
 
 # ---------------------------------------------------------------------------
 # Seed knowledge (from research brief)
@@ -38,15 +39,27 @@ KNOWN_DEAD_ENDS: list[str] = [
     "Pure user-side first-order terms: contribute zero (ranking is within-user; user features constant per user)",
 ]
 
-INITIAL_UNTRIED_DIRECTIONS: list[str] = [
-    "1. Loss: BPR pairwise loss or listwise softmax-per-user (aligns objective with GAUC/nDCG ranking metrics)",
-    "2. User history sequences: DIN/SIM-style attention over user's past interactions (completely blank slate)",
-    "3. Multi-task: is_click/is_like/is_follow/is_comment/is_forward/play_time_ms as auxiliary tasks for long_view",
-    "4. Watch-time censored regression: one-sided loss for truncated play_time_ms (CWM-style)",
-    "5. Model architecture: DeepFM or DCN (lower priority; capacity shown not to be bottleneck)",
-    "6. Temporal features: hourmin, date, and modelling train/valid distribution drift",
-    "7. Unbiased validation: log_random_4_22_to_5_08_pure.csv as debiased check",
-]
+# Methods available to the agent come from the local corpus, not from a ranked
+# list written here. The distinction matters for the autonomy criterion: a
+# hardcoded priority order means the harness chose the research direction and
+# the agent only implemented it. Listing the corpus alphabetically and letting
+# the Strategist select makes the choice — and the reasoning behind it, which
+# lands in the run log — the agent's own.
+def available_methods() -> list[str]:
+    """One line per corpus method, for injection into the Strategist prompt."""
+    return [
+        f"{m['title']}  [{m['method']}]  tags: {', '.join(m['tags'])}"
+        for m in list_methods()
+    ]
+
+
+def seed_hypothesis(method: dict) -> str:
+    """Fallback hypothesis when the Strategist has not proposed one yet."""
+    return (
+        f"Implement {method['title']} on top of the parent model and evaluate it. "
+        f"See the '{method['method']}' entry in the method corpus for the "
+        "implementation details and the conditions under which it does not help."
+    )
 
 # ---------------------------------------------------------------------------
 # Root model.py template (FM baseline adapted for the harness contract)
@@ -239,7 +252,7 @@ def assemble_builder_log(
 
 
 def assemble_strategist_log(iteration: int, strat, config: Config) -> dict:
-    from harness.strategist import StrategistResult
+    from research_agent.strategist import StrategistResult
     return {
         "iteration":          iteration,
         "session_type":       "strategist",
@@ -349,8 +362,9 @@ def main() -> None:
         "status": root_status,
     }]
     pending_strategist_hypotheses: list[str] = []
-    untried_directions = list(INITIAL_UNTRIED_DIRECTIONS)
-    direction_idx = 0   # round-robin index through untried directions
+    corpus_methods = list_methods()
+    method_catalogue = available_methods()
+    method_idx = 0   # cursor into the corpus, used only when the Strategist is silent
 
     run_start = time.time()
 
@@ -386,7 +400,7 @@ def main() -> None:
                 leaderboard=tree.leaderboard(top_k=10),
                 hypothesis_history=hypothesis_history[-20:],
                 dead_ends=KNOWN_DEAD_ENDS,
-                untried_directions=untried_directions,
+                untried_directions=method_catalogue,
                 current_best=tree._best_primary,
                 config=config,
             )
@@ -400,10 +414,11 @@ def main() -> None:
             hypothesis = pending_strategist_hypotheses.pop(0)
             hypothesis_source = f"strategist_iter_{iteration:03d}"
         else:
-            # Round-robin through untried directions as seed
-            hypothesis = untried_directions[direction_idx % len(untried_directions)]
-            hypothesis_source = "tree_round_robin"
-            direction_idx += 1
+            # No Strategist proposal pending: walk the corpus as a seed
+            method = corpus_methods[method_idx % len(corpus_methods)]
+            hypothesis = seed_hypothesis(method)
+            hypothesis_source = f"corpus_seed_{method['method']}"
+            method_idx += 1
 
         # Select parent via UCB
         parent_node = tree.select(C=config.UCB_C)
