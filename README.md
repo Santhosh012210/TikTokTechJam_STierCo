@@ -3,10 +3,10 @@
 An **autonomous ML research agent** that tries to beat the official Factorization Machine
 baseline on the [KuaiRand-Pure](https://kuairand.com) within-user ranking benchmark.
 
-It runs an LLM-driven loop: propose a hypothesis, implement it as a self-contained
-candidate model, train and score it against the fixed evaluation protocol, log the
-result, and use tree search to decide what to try next — until it converges or runs out
-of budget.
+It runs one persistent LLM research session across the complete MLE loop: understand
+the benchmark, inspect train/validation data, research and propose a hypothesis,
+implement a self-contained candidate model, train and score it, repair failures, and
+reflect before the next experiment — until it converges or runs out of budget.
 
 The code splits along one line: `research_agent/` decides what to investigate and try
 next; `harness/` executes those decisions deterministically and records the evidence.
@@ -48,6 +48,9 @@ Each autonomous run writes disposable trial implementations to
 `experiment_workspace/<run_id>/trial_NNN/`. Durable evidence is grouped under
 `artifacts/runs/<run_id>/`, with raw JSONL events, machine-readable metrics, and a
 human-readable summary. See `artifacts/README.md` for the promotion workflow.
+Before any agent call, the runner creates a count-verified, run-local data view containing
+exactly the official train and validation date ranges; hidden-test rows and the randomized
+log are not exposed to candidate processes.
 
 ---
 
@@ -55,10 +58,10 @@ human-readable summary. See `artifacts/README.md` for the promotion workflow.
 
 | Module | Role |
 |---|---|
-| `harness/main.py` | Orchestration loop — tree search, convergence check, budget enforcement |
-| `research_agent/builder.py` | LLM session that implements one hypothesis as a candidate `model.py` and runs it |
-| `research_agent/strategist.py` | Periodic LLM session that reviews progress and proposes new research directions |
-| `research_agent/search/tree.py` | UCB tree search over hypotheses |
+| `harness/agent_main.py` | Single-agent run entrypoint — deterministic baseline, budgets, convergence, evidence |
+| `research_agent/agent.py` | One persistent agent session owning EDA, research, code, execution, repair, and reflection |
+| `harness/agent_tools.py` | Constrained agent tools — train/valid EDA, literature search, file editing, model execution |
+| `harness/main.py` + Builder/Strategist | Previous multi-session architecture retained temporarily for comparison |
 | `research_agent/knowledge/` | Local method corpus + offline BM25 `search_ml_literature` tool |
 | `harness/provider.py` | Provider-agnostic LLM client (Anthropic / Groq / Gemini / Ollama / OpenAI) — switch via `.env` |
 | `harness/logger.py` + `harness/validator.py` | Structured JSONL logging and schema validation |
@@ -92,8 +95,14 @@ python tests/test_knowledge.py
 python baseline_kuairand-starter-kit/baseline.py \
   --model fm --data_dir datasets/KuaiRand-Pure/data
 
-# dev run of the harness (~30 min)
-python -m harness.main --max-iter 10 --wall-hours 0.5 --builder-turns 2
+# single-agent dev run (3 experiments, up to 30 min)
+./scripts/run_agent.sh
+
+# one-experiment smoke run (10 turns, up to 30 min)
+./scripts/run_agent_once.sh
+
+# override the dev defaults when needed
+AGENT_MAX_ITER=5 AGENT_MAX_TURNS=10 ./scripts/run_agent.sh
 ```
 
 ---

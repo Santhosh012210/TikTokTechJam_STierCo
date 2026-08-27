@@ -56,6 +56,9 @@ confined to `harness/provider.py`.
 
 `.env` is gitignored. Never commit API keys.
 
+Gemini 3.x function calls include opaque thought signatures. The provider layer preserves
+and returns this metadata automatically; agent code and run logs never interpret it.
+
 ## 5. Verify
 
 Three checks, cheapest first. Do them in order — each one rules out a class of problem
@@ -87,12 +90,21 @@ dataset before running anything else — every downstream comparison is against 
 ## 6. Run the harness
 
 ```bash
-# dev run, ~30 min
-python -m harness.main --max-iter 10 --wall-hours 0.5 --builder-turns 2
+# single-agent dev run: one persistent agent owns the complete MLE loop
+./scripts/run_agent.sh
+
+# one-experiment smoke run: 1 experiment, 10 turns, 30-minute wall budget
+./scripts/run_agent_once.sh
 
 # full run, only after a dev run succeeds
-python -m harness.main --max-iter 50 --wall-hours 4 --builder-turns 10
+AGENT_MAX_ITER=50 AGENT_WALL_HOURS=4 AGENT_MAX_TURNS=10 ./scripts/run_agent.sh
 ```
+
+The single-agent defaults reserve at most 2,048 output tokens for work turns and 768
+for the closing reflection. Override with `AGENT_MAX_OUTPUT_TOKENS` and
+`AGENT_REFLECTION_MAX_TOKENS` and `AGENT_READ_MAX_CHARS` for a higher-limit provider or
+model.
+Rate-limit failures receive one retry after `RATE_LIMIT_RETRY_DELAY_S` (default 60 seconds).
 
 Trial code goes to the gitignored `experiment_workspace/<run_id>/trial_NNN/`. Durable
 evidence goes to `artifacts/runs/<run_id>/` as `logs/events.jsonl`, `results/metrics.json`,
