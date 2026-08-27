@@ -1,6 +1,14 @@
-# Numerical computing
+# Core numerical dependency used by the official baseline and generated models.
 numpy
 
-# LLM provider SDKs
+# Anthropic provider (`LLM_PROVIDER=anthropic`).
 anthropic
+
+# OpenAI and all OpenAI-compatible providers:
+# - OpenAI (`LLM_PROVIDER=openai`)
+# - Groq (`LLM_PROVIDER=groq`)
+# - Google Gemini OpenAI-compatible endpoint (`LLM_PROVIDER=gemini`)
+# - Ollama OpenAI-compatible local endpoint (`LLM_PROVIDER=ollama`)
 openai
+
+# No separate `groq`, `google-genai`, or `ollama` Python packages are needed. The the harness uses their OpenAI-compatible APIs. 
