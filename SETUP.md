@@ -1,259 +1,139 @@
-# KuaiRand Autonomous ML Research Agent — Setup Guide
+# Setup
 
-Follow this guide from the repository root. Commands use the canonical repository layout and a single root virtual environment.
+First-time setup, from the repository root. For what the project *is*, see [README.md](README.md).
 
 ## 1. Prerequisites
 
-| Requirement | Minimum | Check |
-|---|---:|---|
-| Python | 3.10 | `python --version` or `python3 --version` |
-| pip | Recent | `python -m pip --version` |
-| Internet access | — | Required for packages, data, and hosted LLM providers |
+Python 3.10+ (`python3 --version`) and internet access for packages, data, and a hosted
+LLM provider.
 
-## 2. Repository layout
+## 2. Virtual environment
 
-```text
-TikTokTechJam_STierCo/
-├── .venv/                              local Python environment, gitignored
-├── harness/                           autonomous research agent package
-├── baseline_kuairand-starter-kit/     fixed organizer reference
-├── datasets/
-│   ├── README.md                       dataset download instructions
-│   └── KuaiRand-Pure/data/            downloaded CSV files, gitignored
-├── experiment_workspace/             disposable generated trial code, gitignored
-├── artifacts/
-│   ├── runs/<run_id>/                 logs, results, and reports for one agent run
-│   └── final/                         selected model and submission evidence
-├── requirements.txt
-└── .env                               local provider configuration, gitignored
-```
-
-Keep `baseline_kuairand-starter-kit/` unchanged. It is the versioned source of truth for the official baseline, split logic, evaluator, and submission format.
-
-## 3. Create the root virtual environment
-
-### Windows PowerShell
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-```
-
-If PowerShell blocks activation:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-
-### macOS and Linux
+One venv at the repository root. All later commands assume it is active.
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-```
-
-All remaining commands assume `.venv` is active and are run from the repository root.
-
-## 4. Install dependencies
-
-```bash
-python -m pip install --upgrade pip
+source .venv/bin/activate          # Windows: .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 ```
 
-The single requirements file supports Anthropic and the OpenAI-compatible providers: OpenAI, Groq, Gemini, and Ollama.
+If PowerShell blocks activation: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-## 5. Download KuaiRand-Pure
+## 3. Dataset
 
-Follow [datasets/README.md](datasets/README.md). The required CSV files must end up at:
+KuaiRand-Pure, ~300MB from Zenodo — no registration:
 
-```text
-datasets/KuaiRand-Pure/data/
+```bash
+curl -L https://zenodo.org/records/10439422/files/KuaiRand-Pure.tar.gz \
+  -o datasets/KuaiRand-Pure.tar.gz
+tar -xzf datasets/KuaiRand-Pure.tar.gz -C datasets
 ```
 
-KuaiRand-1k and KuaiRand-27k are optional bonus datasets and are not required for the primary benchmark.
+Windows PowerShell uses `Invoke-WebRequest` instead of `curl`; the exact command, the six
+expected CSV filenames, and the bonus datasets are in
+[datasets/README.md](datasets/README.md).
 
-## 6. Configure an LLM provider
+Verify the six CSVs landed in the right place:
 
-Copy the environment template:
-
-### Windows PowerShell
-
-```powershell
-Copy-Item .env.example .env
-notepad .env
+```bash
+ls datasets/KuaiRand-Pure/data/*.csv | wc -l    # expect 6
 ```
 
-### macOS and Linux
+Downloaded data is gitignored — never commit the archive or the CSVs.
+
+## 4. LLM provider
 
 ```bash
 cp .env.example .env
 ```
 
-Enable exactly one provider block in `.env`. Every hosted provider uses the same
-variable names. For example, Groq uses:
+Uncomment exactly one provider block in `.env` — every provider uses the same variable
+names (`LLM_PROVIDER`, `LLM_API_KEY`, optionally `LLM_MODEL` / `LLM_BASE_URL`), and each
+block in the template carries its own default model. Ollama needs no API key.
 
-```dotenv
-LLM_PROVIDER=groq
-LLM_API_KEY=gsk_your_key_here
-```
+Switching providers later is a `.env` edit, not a code change; provider-specific code is
+confined to `harness/provider.py`.
 
-Current provider examples—copy one only:
+`.env` is gitignored. Never commit API keys.
 
-Anthropic:
+## 5. Verify
 
-```dotenv
-LLM_PROVIDER=anthropic
-LLM_API_KEY=sk-ant-your-key-here
-```
+Three checks, cheapest first. Do them in order — each one rules out a class of problem
+that would otherwise show up as a confusing failure later.
 
-Default model: `claude-haiku-4-5-20251001`.
-
-Groq:
-
-```dotenv
-LLM_PROVIDER=groq
-LLM_API_KEY=gsk_your_key_here
-```
-
-Default model: `openai/gpt-oss-120b`.
-
-Google Gemini:
-
-```dotenv
-LLM_PROVIDER=gemini
-LLM_API_KEY=your-gemini-key-here
-```
-
-Default model: `gemini-2.0-flash`.
-
-OpenAI:
-
-```dotenv
-LLM_PROVIDER=openai
-LLM_API_KEY=sk-your-openai-key-here
-```
-
-Default model: `gpt-4o-mini`.
-
-Ollama:
-
-```dotenv
-LLM_PROVIDER=ollama
-```
-
-Default model: `llama3.2`; no API key is required.
-
-`LLM_MODEL` is optional. When omitted, the harness chooses the default shown for the
-selected provider. Set it only to override that default. `LLM_BASE_URL` is also optional;
-it is mainly useful for a custom Ollama endpoint or another compatible gateway.
-
-The `.env` file is ignored by Git. Never commit API keys.
-
-## 7. Verify paths and imports
+**Imports and paths** (instant, no data needed):
 
 ```bash
-python -c "from harness.config import load_config; c=load_config(); print(c.DATA_DIR); print(c.BASELINE_ROOT); print(c.BASELINE_PRIMARY)"
+python -c "from harness.config import load_config; c=load_config(); print(c.DATA_DIR, c.BASELINE_PRIMARY)"
 ```
 
-The command should print the dataset path, the baseline directory, and baseline primary score `0.6016` without raising an exception.
+Prints the dataset path and `0.6016`.
 
-## 8. Reproduce the official baseline
+**Offline tests** (seconds, no API key, no data):
 
 ```bash
-python baseline_kuairand-starter-kit/baseline.py \
-  --model fm \
-  --data_dir datasets/KuaiRand-Pure/data
+python tests/test_knowledge.py
 ```
 
-The validation primary score should be within `±0.002` of the published value `0.6016`. If it is not, stop and verify the dataset files and path before running agent experiments.
-
-## 9. Run the agent harness
-
-Development run:
+**Baseline reproduction** (~40s, needs the dataset):
 
 ```bash
-python -m harness.main \
-  --max-iter 10 \
-  --wall-hours 0.5 \
-  --builder-turns 2
+python baseline_kuairand-starter-kit/baseline.py --model fm --data_dir datasets/KuaiRand-Pure/data
 ```
 
-Full run, after the development run succeeds:
+Validation primary must land within ±0.002 of `0.6016`. If it does not, stop and fix the
+dataset before running anything else — every downstream comparison is against this number.
+
+## 6. Run the harness
 
 ```bash
-python -m harness.main \
-  --max-iter 50 \
-  --wall-hours 4 \
-  --builder-turns 10
+# dev run, ~30 min
+python -m harness.main --max-iter 10 --wall-hours 0.5 --builder-turns 2
+
+# full run, only after a dev run succeeds
+python -m harness.main --max-iter 50 --wall-hours 4 --builder-turns 10
 ```
 
-Generated trial implementations are written to the Git-ignored
-`experiment_workspace/<run_id>/`. Durable run evidence is written to:
+Trial code goes to the gitignored `experiment_workspace/<run_id>/trial_NNN/`. Durable
+evidence goes to `artifacts/runs/<run_id>/` as `logs/events.jsonl`, `results/metrics.json`,
+and `reports/summary.md`. See `artifacts/README.md` for promoting a run to `artifacts/final/`.
 
-```text
-artifacts/runs/<run_id>/
-├── logs/events.jsonl
-├── results/metrics.json
-└── reports/summary.md
-```
-
-Review a run there, then copy its selected model and submission evidence into
-`artifacts/final/` when it is designated for submission.
-
-## 10. Validate a run log
+Check a run's log schema:
 
 ```bash
 python -m harness.validator artifacts/runs/<run_id>/logs/events.jsonl
 ```
 
-Exit code `0` means every row passed schema validation. Exit code `1` means validation errors were written to stderr.
+Exit `0` means every row passed.
 
-## 11. Generate or validate a submission
+## 7. Submissions
 
-Generate an example submission with the official baseline:
-
-```bash
-python baseline_kuairand-starter-kit/submit.py submission.csv \
-  --make \
-  --split test \
-  --data_dir datasets/KuaiRand-Pure/data
-```
-
-Validate a submission before uploading it:
+`submit.py` takes the path first, then a mode flag:
 
 ```bash
-python baseline_kuairand-starter-kit/submit.py submission.csv \
-  --check \
-  --split test \
-  --data_dir datasets/KuaiRand-Pure/data
+SK=baseline_kuairand-starter-kit
+python $SK/submit.py submission.csv --make  --split test  --data_dir datasets/KuaiRand-Pure/data
+python $SK/submit.py submission.csv --check --split test  --data_dir datasets/KuaiRand-Pure/data
 ```
 
-## Provider switching
+`--make` generates an example from the official FM baseline; `--check` validates header,
+row count, `row_id` continuity, and alignment. Always run `--check` before submitting.
+`--score` also scores, and is only valid on `--split valid`.
 
-Switch providers by changing `LLM_PROVIDER` and `LLM_API_KEY`; no source changes are
-needed. Optionally set `LLM_MODEL` or `LLM_BASE_URL` to override the selected provider's
-defaults. Provider-specific code is isolated in `harness/provider.py`.
+## Other commands
+
+```bash
+python -m research_agent.knowledge --list          # method corpus contents
+python -m research_agent.knowledge "bpr gradient"  # query it (offline)
+python tests/live_builder_smoke.py                 # live Builder check — costs tokens
+```
 
 ## Troubleshooting
 
-### `ModuleNotFoundError: No module named 'harness'`
-
-Run commands from the repository root and invoke the package with `python -m harness.main`.
-
-### `FileNotFoundError: Data directory not found`
-
-Confirm that `datasets/KuaiRand-Pure/data/` contains the six CSV files listed in `datasets/README.md`.
-
-### Baseline primary is outside the expected range
-
-Check the dataset location and integrity. Re-download the archive if files are missing or incomplete.
-
-### Provider API key is missing
-
-Confirm that `.env` exists at the repository root and contains `LLM_PROVIDER` plus
-`LLM_API_KEY`. Ollama is the only provider that does not require `LLM_API_KEY`.
-
-### Ollama connection refused
-
-Start Ollama and ensure its OpenAI-compatible endpoint is available before launching the agent harness.
+| Symptom | Fix |
+|---|---|
+| `ModuleNotFoundError: No module named 'harness'` | Run from the repo root, and invoke as `python -m harness.main` |
+| `FileNotFoundError: Data directory not found` | `datasets/KuaiRand-Pure/data/` is missing the CSVs — see `datasets/README.md` |
+| Baseline primary outside ±0.002 | Dataset is incomplete or wrong. Re-download; do not proceed |
+| Provider API key missing | `.env` needs `LLM_PROVIDER` and `LLM_API_KEY` (Ollama excepted) |
+| Ollama connection refused | Start Ollama and confirm its OpenAI-compatible endpoint is up |
