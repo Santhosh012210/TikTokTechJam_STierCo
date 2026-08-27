@@ -6,3 +6,10 @@
 src/test_run*
 __pycache__/
 *.pyc
+
+# Python virtualenvs
+venv/
+.venv/
+
+# Secrets — never commit
+.env
