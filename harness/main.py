@@ -2,10 +2,10 @@
 
 Usage:
   # Dev run (fast feedback, 2 builder turns)
-  python -m agent_harness.main --max-iter 10 --wall-hours 0.5 --builder-turns 2
+  python -m harness.main --max-iter 10 --wall-hours 0.5 --builder-turns 2
 
   # Production run (after the agent harness is verified)
-  python -m agent_harness.main --max-iter 50 --wall-hours 4 --builder-turns 10
+  python -m harness.main --max-iter 50 --wall-hours 4 --builder-turns 10
 """
 import argparse
 import difflib
@@ -15,17 +15,17 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Ensure the agent_harness package is importable when this file is run directly.
+# Ensure the harness package is importable when this file is run directly.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from agent_harness.builder import BuilderResult, run_builder_session
-from agent_harness.config import Config, load_config
-from agent_harness.logger import RunLogger
-from agent_harness.strategist import run_strategist_session
-from agent_harness.tree import SearchTree
-from agent_harness.validator import scan_candidate_source
+from harness.builder import BuilderResult, run_builder_session
+from harness.config import Config, load_config
+from harness.logger import RunLogger
+from harness.strategist import run_strategist_session
+from harness.tree import SearchTree
+from harness.validator import scan_candidate_source
 
 # ---------------------------------------------------------------------------
 # Seed knowledge (from research brief)
@@ -204,7 +204,7 @@ def assemble_builder_log(
     diff_lines = list(difflib.unified_diff(
         parent_code.splitlines(),
         new_code.splitlines(),
-        fromfile=f"iter_{parent_node_id:03d}/model.py" if parent_node_id is not None else "baseline",
+        fromfile=f"trial_{parent_node_id:03d}/model.py" if parent_node_id is not None else "baseline",
         tofile=f"{candidate_dir.name}/model.py",
         lineterm="",
     ))
@@ -238,7 +238,7 @@ def assemble_builder_log(
 
 
 def assemble_strategist_log(iteration: int, strat, config: Config) -> dict:
-    from agent_harness.strategist import StrategistResult
+    from harness.strategist import StrategistResult
     return {
         "iteration":          iteration,
         "session_type":       "strategist",
@@ -289,15 +289,18 @@ def main() -> None:
     _ = config.api_key
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    logger = RunLogger(config.LOGS_DIR, run_id)
+    logger = RunLogger(config.ARTIFACTS_DIR, run_id)
+    run_workspace = config.EXPERIMENT_WORKSPACE_DIR / run_id
+    run_workspace.mkdir(parents=True, exist_ok=True)
     print(f"[harness] run_id={run_id}  log={logger.path}")
+    print(f"[harness] workspace={run_workspace}")
     print(f"[harness] budget: {config.ITERATION_BUDGET} iters / {args.wall_hours}h / builder_turns={config.BUILDER_MAX_TURNS}")
     print(f"[harness] baseline primary={config.BASELINE_PRIMARY:.4f}  oracle={config.ORACLE_PRIMARY:.4f}  headroom={config.HEADROOM:.4f}")
 
     # ------------------------------------------------------------------
     # Root candidate: FM baseline
     # ------------------------------------------------------------------
-    root_candidate_dir = config.CANDIDATES_DIR / "iter_000"
+    root_candidate_dir = run_workspace / "trial_000"
     root_candidate_dir.mkdir(parents=True, exist_ok=True)
     root_model_py = root_candidate_dir / "model.py"
     root_model_py.write_text(make_root_model_py(config), encoding="utf-8")
@@ -409,7 +412,7 @@ def main() -> None:
         )
 
         # Create candidate directory and add tree node
-        candidate_dir = config.CANDIDATES_DIR / f"iter_{iteration:03d}"
+        candidate_dir = run_workspace / f"trial_{iteration:03d}"
         candidate_dir.mkdir(parents=True, exist_ok=True)
         child_node = tree.add_child(
             parent_id=parent_node.id,
@@ -487,28 +490,79 @@ def main() -> None:
     # Summary
     # ------------------------------------------------------------------
     totals = logger.running_totals()
-    logger.close()
-
     best_nodes = tree.leaderboard(top_k=1)
     best_node  = best_nodes[0] if best_nodes else None
 
+    results_payload = {
+        "run_id": run_id,
+        "baseline": {
+            "GAUC": config.BASELINE_GAUC,
+            "nDCG@5": config.BASELINE_NDCG,
+            "primary": config.BASELINE_PRIMARY,
+        },
+        "best_trial": (
+            {
+                "trial": best_node.id,
+                "primary": best_node.primary,
+                "hypothesis": best_node.hypothesis,
+                "workspace_code_path": best_node.code_path,
+            }
+            if best_node else None
+        ),
+        "trials_completed": len(primary_history) - 1,
+        "tokens": totals["tokens"],
+        "manual_interventions": totals["interventions"],
+        "tree": tree.to_dict(),
+    }
+    results_path = logger.write_results(results_payload)
+
+    best_summary = (
+        f"trial_{best_node.id:03d} with validation primary "
+        f"{best_node.primary:.4f}\n\n"
+        f"Hypothesis: {best_node.hypothesis}\n"
+        if best_node else "No successful trial was produced.\n"
+    )
+    report_path = logger.write_report(
+        f"""# Autonomous research run {run_id}
+
+## Outcome
+
+{best_summary}
+## Run totals
+
+- Trials completed: {len(primary_history) - 1}
+- Input tokens: {totals['tokens']['input']}
+- Output tokens: {totals['tokens']['output']}
+- Manual interventions: {totals['interventions']}
+- Baseline validation primary: {config.BASELINE_PRIMARY:.4f}
+
+## Evidence
+
+- Raw event log: `../logs/events.jsonl`
+- Machine-readable results: `../results/metrics.json`
+
+Trial implementations were generated in the Git-ignored `experiment_workspace/`.
+Promote the selected final implementation into `artifacts/final/` before submission.
+"""
+    )
+    logger.close()
+
     print("\n" + "=" * 60)
     print(f"Run complete. Log: {logger.path}")
-    print(f"Iterations: {len(primary_history) - 1} (root + {len(primary_history) - 1} candidates)")
+    print(f"Trials: {len(primary_history) - 1} (root + {len(primary_history) - 1} experiments)")
     print(f"Tokens: input={totals['tokens']['input']:,}  output={totals['tokens']['output']:,}")
     print(f"Manual interventions: {totals['interventions']}")
     if best_node:
-        print(f"Best candidate: iter_{best_node.id:03d}  primary={best_node.primary:.4f}")
+        print(f"Best trial: trial_{best_node.id:03d}  primary={best_node.primary:.4f}")
         print(f"  Code: {best_node.code_path}")
         print(f"  Hypothesis: {best_node.hypothesis}")
     print("=" * 60)
+    print(f"Results: {results_path}")
+    print(f"Report: {report_path}")
     print("\nNext steps:")
-    print("  1. Review the log: agent_harness/validator.py  logs/*.jsonl")
+    print(f"  1. Validate the log: python -m harness.validator {logger.path}")
     print("  2. Run test eval on best candidate (ONE TIME ONLY)")
-    print(
-        "  3. Generate submission: python baseline_kuairand-starter-kit/submit.py "
-        "submission.csv --make --split test --data_dir datasets/KuaiRand-Pure/data"
-    )
+    print("  3. Copy the selected model and submission evidence into artifacts/final/")
 
 
 if __name__ == "__main__":

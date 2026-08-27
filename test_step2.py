@@ -12,8 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from agent_harness.config import load_config
-from agent_harness.builder import run_builder_session
+from harness.config import load_config
+from harness.builder import run_builder_session
 
 def main():
     config = load_config()
@@ -23,11 +23,12 @@ def main():
     print("=" * 60)
     print("TEST 1: Broken hypothesis (expect repair_count >= 1)")
     print("=" * 60)
-    broken_dir = config.CANDIDATES_DIR / "test_broken"
+    test_workspace = config.EXPERIMENT_WORKSPACE_DIR / "dev_tests"
+    broken_dir = test_workspace / "test_broken"
     broken_dir.mkdir(parents=True, exist_ok=True)
 
     # Give it the root model.py as parent
-    root_mp = config.CANDIDATES_DIR / "iter_000" / "model.py"
+    root_mp = test_workspace / "trial_000" / "model.py"
     parent = str(root_mp) if root_mp.exists() else str(config.BASELINE_ROOT / "baseline.py")
 
     result1 = run_builder_session(
@@ -54,7 +55,7 @@ def main():
     print("=" * 60)
     print("TEST 2: Trivial hypothesis — change k from 16 to 8")
     print("=" * 60)
-    trivial_dir = config.CANDIDATES_DIR / "test_trivial"
+    trivial_dir = test_workspace / "test_trivial"
     trivial_dir.mkdir(parents=True, exist_ok=True)
 
     result2 = run_builder_session(

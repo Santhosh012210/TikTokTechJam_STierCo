@@ -1,6 +1,6 @@
 """Strategist session: single-turn LLM call that proposes research direction.
 
-Provider-agnostic — all SDK calls go through agent_harness.provider.LLMClient.
+Provider-agnostic — all SDK calls go through harness.provider.LLMClient.
 No tool calls — all context injected as text.
 The `reasoning` field is logged verbatim (graded deliverable).
 """
@@ -9,9 +9,9 @@ import re
 import time
 from dataclasses import dataclass
 
-from agent_harness.config import Config
-from agent_harness.provider import make_client
-from agent_harness.tree import Node
+from harness.config import Config
+from harness.provider import make_client
+from harness.tree import Node
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -34,9 +34,9 @@ class StrategistResult:
 
 def _format_leaderboard(nodes: list[Node]) -> str:
     if not nodes:
-        return "  (no successful candidates yet)"
+        return "  (no successful trials yet)"
     return "\n".join(
-        f"  {rank}. iter_{n.id:03d} | primary={n.primary:.4f} | {n.hypothesis[:80]}"
+        f"  {rank}. trial_{n.id:03d} | primary={n.primary:.4f} | {n.hypothesis[:80]}"
         for rank, n in enumerate(nodes, 1)
     )
 
@@ -45,7 +45,7 @@ def _format_history(history: list[dict]) -> str:
     if not history:
         return "  (no iterations yet)"
     return "\n".join(
-        f"  iter_{h['iteration']:03d} [{h['status']:8s}] "
+        f"  trial_{h['iteration']:03d} [{h['status']:8s}] "
         f"primary={h['primary']:.4f if h.get('primary') is not None else 'failed'} "
         f"| {h['hypothesis'][:80]}"
         for h in reversed(history)

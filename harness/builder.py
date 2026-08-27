@@ -1,10 +1,10 @@
 """Builder session: one LLM multi-turn loop per candidate.
 
-Provider-agnostic — all SDK calls go through agent_harness.provider.LLMClient.
+Provider-agnostic — all SDK calls go through harness.provider.LLMClient.
 
 Given a hypothesis and a parent code path, the builder:
   1. Reads the parent code.
-  2. Writes candidates/iter_NNN/model.py via write_file tool.
+  2. Writes experiment_workspace/<run_id>/trial_NNN/model.py via write_file tool.
   3. Runs it via run_bash tool.
   4. Self-repairs on error (up to max_turns).
   5. Returns structured BuilderResult.
@@ -15,9 +15,9 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent_harness.config import Config
-from agent_harness.provider import LLMClient, LLMResponse, make_client
-from agent_harness.tools import BUILDER_TOOLS, dispatch_tool_call, redact_secrets
+from harness.config import Config
+from harness.provider import LLMClient, LLMResponse, make_client
+from harness.tools import BUILDER_TOOLS, dispatch_tool_call, redact_secrets
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -81,7 +81,7 @@ HYPOTHESIS TO IMPLEMENT:
 PARENT CODE (your starting point):
 Read it from: {parent_code_path}
 
-CANDIDATE DIRECTORY: iter_{node_id:03d}/
+TRIAL DIRECTORY: trial_{node_id:03d}/
 You will write your implementation there using write_file, then run it using run_bash.
 
 ════════════════════════════════════════════════════════════

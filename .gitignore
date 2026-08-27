@@ -18,6 +18,7 @@ venv/
 # Generated and temporary files
 temp/
 src/test_run*
+experiment_workspace/
 
 # Local datasets
 datasets/KuaiRand-Pure/

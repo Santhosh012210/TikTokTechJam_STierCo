@@ -26,8 +26,8 @@ def _load_dotenv(path: Path) -> None:
             os.environ[k] = v
 
 
-# Repository root (contains agent_harness/, baseline_kuairand-starter-kit/,
-# datasets/, candidates/, and logs/).
+# Repository root (contains harness/, baseline_kuairand-starter-kit/,
+# datasets/, experiment_workspace/, and artifacts/).
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Load .env before anything reads os.environ
@@ -40,13 +40,13 @@ _load_dotenv(_PROJECT_ROOT / ".env")
 
 class Config:
     # Paths
-    PROJECT_ROOT:   Path = _PROJECT_ROOT
-    BASELINE_ROOT:  Path = _PROJECT_ROOT / "baseline_kuairand-starter-kit"
-    DATA_DIR:       Path = _PROJECT_ROOT / "datasets" / "KuaiRand-Pure" / "data"
-    CANDIDATES_DIR: Path = _PROJECT_ROOT / "candidates"
-    LOGS_DIR:       Path = _PROJECT_ROOT / "logs"
-    HARNESS_DIR:    Path = _PROJECT_ROOT / "agent_harness"
-    BASELINE_JSON:  Path = BASELINE_ROOT / "baseline_scores.json"
+    PROJECT_ROOT:             Path = _PROJECT_ROOT
+    BASELINE_ROOT:            Path = _PROJECT_ROOT / "baseline_kuairand-starter-kit"
+    DATA_DIR:                 Path = _PROJECT_ROOT / "datasets" / "KuaiRand-Pure" / "data"
+    EXPERIMENT_WORKSPACE_DIR: Path = _PROJECT_ROOT / "experiment_workspace"
+    ARTIFACTS_DIR:            Path = _PROJECT_ROOT / "artifacts"
+    HARNESS_DIR:              Path = _PROJECT_ROOT / "harness"
+    BASELINE_JSON:            Path = BASELINE_ROOT / "baseline_scores.json"
 
     # Loaded from baseline_scores.json
     BASELINE_PRIMARY:     float = 0.6016
@@ -109,9 +109,9 @@ def load_config() -> Config:
         cfg.CONVERGENCE_EPSILON = float(conv.get("epsilon", cfg.CONVERGENCE_EPSILON))
         cfg.CONVERGENCE_N       = int(conv.get("N",       cfg.CONVERGENCE_N))
 
-    # Ensure output directories exist
-    cfg.CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
-    cfg.LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    # Ensure generated workspace and durable artifact roots exist.
+    cfg.EXPERIMENT_WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    cfg.ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
     # Resolve Python executable (prefer the repository-level virtual environment)
     venv_py = cfg.PROJECT_ROOT / ".venv" / (

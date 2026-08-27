@@ -16,7 +16,6 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-# ---------------------------------------------------------------------------
 # Canonical types (provider-agnostic)
 # ---------------------------------------------------------------------------
 
@@ -36,7 +35,6 @@ class LLMResponse:
     output_tokens: int
 
 
-# ---------------------------------------------------------------------------
 # Abstract client interface
 # ---------------------------------------------------------------------------
 

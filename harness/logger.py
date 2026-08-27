@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from agent_harness.validator import validate_row
+from harness.validator import validate_row
 
 
 class _NpEncoder(json.JSONEncoder):
@@ -29,17 +29,26 @@ class _NpEncoder(json.JSONEncoder):
 
 
 class RunLogger:
-    def __init__(self, logs_dir: Path, run_id: str) -> None:
-        self._path = logs_dir / f"run_{run_id}.jsonl"
+    def __init__(self, artifacts_dir: Path, run_id: str) -> None:
+        self._run_dir = artifacts_dir / "runs" / run_id
+        self._logs_dir = self._run_dir / "logs"
+        self._results_dir = self._run_dir / "results"
+        self._reports_dir = self._run_dir / "reports"
+        self._path = self._logs_dir / "events.jsonl"
         self._token_total: dict[str, int] = {"input": 0, "output": 0}
         self._intervention_count: int = 0
-        logs_dir.mkdir(parents=True, exist_ok=True)
+        for directory in (self._logs_dir, self._results_dir, self._reports_dir):
+            directory.mkdir(parents=True, exist_ok=True)
         # Open in append mode and keep handle open for the lifetime of the run
         self._file = open(self._path, "a", encoding="utf-8")
 
     @property
     def path(self) -> Path:
         return self._path
+
+    @property
+    def run_dir(self) -> Path:
+        return self._run_dir
 
     def write(self, row: dict) -> None:
         """Write one log entry. Guaranteed to fsync before returning."""
@@ -76,6 +85,25 @@ class RunLogger:
             "tokens": dict(self._token_total),
             "interventions": self._intervention_count,
         }
+
+    def write_results(self, results: dict) -> Path:
+        """Write the machine-readable run summary."""
+        path = self._results_dir / "metrics.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps(results, cls=_NpEncoder, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        tmp.replace(path)
+        return path
+
+    def write_report(self, report: str) -> Path:
+        """Write the human-readable run report."""
+        path = self._reports_dir / "summary.md"
+        tmp = path.with_suffix(".md.tmp")
+        tmp.write_text(report.rstrip() + "\n", encoding="utf-8")
+        tmp.replace(path)
+        return path
 
     def close(self) -> None:
         try:

@@ -2,7 +2,8 @@
 1. scan_candidate_source() — reject model.py files that access the test split.
 2. validate_row() / validate_file() — enforce the JSONL log schema.
 
-Run standalone: python -m agent_harness.validator logs/run_TIMESTAMP.jsonl
+Run standalone:
+python -m harness.validator artifacts/runs/<run_id>/logs/events.jsonl
 """
 import json
 import re

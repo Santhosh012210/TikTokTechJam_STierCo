@@ -15,13 +15,15 @@ Follow this guide from the repository root. Commands use the canonical repositor
 ```text
 TikTokTechJam_STierCo/
 ├── .venv/                              local Python environment, gitignored
-├── agent_harness/                     autonomous research agent package
+├── harness/                           autonomous research agent package
 ├── baseline_kuairand-starter-kit/     fixed organizer reference
 ├── datasets/
 │   ├── README.md                       dataset download instructions
 │   └── KuaiRand-Pure/data/            downloaded CSV files, gitignored
-├── candidates/                        generated experiment code
-├── logs/                              generated JSONL run logs
+├── experiment_workspace/             disposable generated trial code, gitignored
+├── artifacts/
+│   ├── runs/<run_id>/                 logs, results, and reports for one agent run
+│   └── final/                         selected model and submission evidence
 ├── requirements.txt
 └── .env                               local provider configuration, gitignored
 ```
@@ -100,7 +102,7 @@ The `.env` file is ignored by Git. Never commit API keys.
 ## 7. Verify paths and imports
 
 ```bash
-python -c "from agent_harness.config import load_config; c=load_config(); print(c.DATA_DIR); print(c.BASELINE_ROOT); print(c.BASELINE_PRIMARY)"
+python -c "from harness.config import load_config; c=load_config(); print(c.DATA_DIR); print(c.BASELINE_ROOT); print(c.BASELINE_PRIMARY)"
 ```
 
 The command should print the dataset path, the baseline directory, and baseline primary score `0.6016` without raising an exception.
@@ -120,7 +122,7 @@ The validation primary score should be within `±0.002` of the published value `
 Development run:
 
 ```bash
-python -m agent_harness.main \
+python -m harness.main \
   --max-iter 10 \
   --wall-hours 0.5 \
   --builder-turns 2
@@ -129,18 +131,29 @@ python -m agent_harness.main \
 Full run, after the development run succeeds:
 
 ```bash
-python -m agent_harness.main \
+python -m harness.main \
   --max-iter 50 \
   --wall-hours 4 \
   --builder-turns 10
 ```
 
-Generated candidates are written to `candidates/`; iteration logs are written to `logs/`.
+Generated trial implementations are written to the Git-ignored
+`experiment_workspace/<run_id>/`. Durable run evidence is written to:
+
+```text
+artifacts/runs/<run_id>/
+├── logs/events.jsonl
+├── results/metrics.json
+└── reports/summary.md
+```
+
+Review a run there, then copy its selected model and submission evidence into
+`artifacts/final/` when it is designated for submission.
 
 ## 10. Validate a run log
 
 ```bash
-python -m agent_harness.validator logs/<run_file>.jsonl
+python -m harness.validator artifacts/runs/<run_id>/logs/events.jsonl
 ```
 
 Exit code `0` means every row passed schema validation. Exit code `1` means validation errors were written to stderr.
@@ -167,13 +180,13 @@ python baseline_kuairand-starter-kit/submit.py submission.csv \
 
 ## Provider switching
 
-Switch providers by editing `.env`; no source changes are needed. Optionally set `LLM_MODEL` to override the provider's default model. Provider-specific code is isolated in `agent_harness/provider.py`.
+Switch providers by editing `.env`; no source changes are needed. Optionally set `LLM_MODEL` to override the provider's default model. Provider-specific code is isolated in `harness/provider.py`.
 
 ## Troubleshooting
 
-### `ModuleNotFoundError: No module named 'agent_harness'`
+### `ModuleNotFoundError: No module named 'harness'`
 
-Run commands from the repository root and invoke the package with `python -m agent_harness.main`.
+Run commands from the repository root and invoke the package with `python -m harness.main`.
 
 ### `FileNotFoundError: Data directory not found`
 

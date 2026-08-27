@@ -30,14 +30,19 @@ Full conventions live in `baseline_kuairand-starter-kit/evaluate.py` and its REA
 ## Repository layout
 
 ```
-agent_harness/                     autonomous research agent (orchestration, builder, strategist, tree search)
+harness/                           autonomous research agent (orchestration, builder, strategist, tree search)
 baseline_kuairand-starter-kit/     organiser starter kit — read-only reference
 datasets/                          dataset instructions; downloaded data is gitignored
-candidates/               one folder per experiment (auto-created)
-logs/                     JSONL run logs (auto-created)
-requirements.txt          Python dependencies for all supported LLM providers
-SETUP.md                  full first-time setup guide
+experiment_workspace/              generated trial code; local and gitignored
+artifacts/                          tracked run evidence, results, reports, and final submission
+requirements.txt                   Python dependencies for all supported LLM providers
+SETUP.md                           full first-time setup guide
 ```
+
+Each autonomous run writes disposable trial implementations to
+`experiment_workspace/<run_id>/trial_NNN/`. Durable evidence is grouped under
+`artifacts/runs/<run_id>/`, with raw JSONL events, machine-readable metrics, and a
+human-readable summary. See `artifacts/README.md` for the promotion workflow.
 
 ---
 
@@ -45,13 +50,13 @@ SETUP.md                  full first-time setup guide
 
 | Module | Role |
 |---|---|
-| `agent_harness/main.py` | Orchestration loop — tree search, convergence check, budget enforcement |
-| `agent_harness/builder.py` | LLM session that implements one hypothesis as a candidate `model.py` and runs it |
-| `agent_harness/strategist.py` | Periodic LLM session that reviews progress and proposes new research directions |
-| `agent_harness/tree.py` | UCB tree search over hypotheses |
-| `agent_harness/provider.py` | Provider-agnostic LLM client (Anthropic / Groq / Gemini / Ollama / OpenAI) — switch via `.env` |
-| `agent_harness/logger.py` + `agent_harness/validator.py` | Structured JSONL logging and schema validation |
-| `agent_harness/config.py` | Single source of runtime constants and paths |
+| `harness/main.py` | Orchestration loop — tree search, convergence check, budget enforcement |
+| `harness/builder.py` | LLM session that implements one hypothesis as a candidate `model.py` and runs it |
+| `harness/strategist.py` | Periodic LLM session that reviews progress and proposes new research directions |
+| `harness/tree.py` | UCB tree search over hypotheses |
+| `harness/provider.py` | Provider-agnostic LLM client (Anthropic / Groq / Gemini / Ollama / OpenAI) — switch via `.env` |
+| `harness/logger.py` + `harness/validator.py` | Structured JSONL logging and schema validation |
+| `harness/config.py` | Single source of runtime constants and paths |
 
 Convergence rule (from the starter kit's 5-seed variance): ε = 0.002, N = 3 — three
 consecutive iterations with ≤0.002 validation gain means stop.
@@ -73,7 +78,7 @@ python baseline_kuairand-starter-kit/baseline.py \
   --model fm --data_dir datasets/KuaiRand-Pure/data
 
 # dev run of the harness (~30 min)
-python -m agent_harness.main --max-iter 10 --wall-hours 0.5 --builder-turns 2
+python -m harness.main --max-iter 10 --wall-hours 0.5 --builder-turns 2
 ```
 
 ---
