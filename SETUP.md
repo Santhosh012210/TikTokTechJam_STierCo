@@ -116,7 +116,7 @@ LLM_PROVIDER=groq
 LLM_API_KEY=gsk_your_key_here
 ```
 
-Default model: `llama-3.3-70b-versatile`.
+Default model: `openai/gpt-oss-120b`.
 
 Google Gemini:
 

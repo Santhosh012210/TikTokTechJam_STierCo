@@ -2,7 +2,7 @@
 
 Switch providers by setting LLM_PROVIDER in .env:
   LLM_PROVIDER=anthropic   → model defaults to claude-haiku-4-5-20251001
-  LLM_PROVIDER=groq        → model defaults to llama-3.3-70b-versatile
+  LLM_PROVIDER=groq        → model defaults to openai/gpt-oss-120b
   LLM_PROVIDER=gemini      → model defaults to gemini-2.0-flash
   LLM_PROVIDER=ollama      → model defaults to llama3.2
   LLM_PROVIDER=openai      → model defaults to gpt-4o-mini
@@ -213,7 +213,7 @@ _PROVIDER_DEFAULTS: dict[str, dict] = {
     },
     "groq": {
         "requires_api_key": True,
-        "model":    "llama-3.3-70b-versatile",
+        "model":    "openai/gpt-oss-120b",
         "base_url": "https://api.groq.com/openai/v1",
     },
     "gemini": {
