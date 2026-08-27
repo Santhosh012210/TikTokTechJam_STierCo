@@ -20,5 +20,8 @@ temp/
 src/test_run*
 
 # Local datasets
-**/rec_datasets/**/*.csv
-**/KuaiRand-Pure/
+datasets/KuaiRand-Pure/
+datasets/KuaiRand-1k/
+datasets/KuaiRand-27k/
+datasets/*.tar.gz
+datasets/*.zip
