@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(Get-Command py -ErrorAction SilentlyContinue)",
-      "PowerShell(py --version 2>&1)",
-      "PowerShell(py -c \"import sys; print\\(sys.version\\); import torch; print\\('torch:', torch.__version__\\)\")"
-    ]
-  }
-}

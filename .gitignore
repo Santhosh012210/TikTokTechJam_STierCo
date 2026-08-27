@@ -1,15 +1,23 @@
+# Operating system files
 .DS_Store
+
+# Editor and local agent settings
 .vscode/
-**/rec_datasets/**/*.csv
-**/KuaiRand-Pure/data/
-**/KuaiRand-Pure
-src/test_run*
+.claude/
+
+# Python cache and virtual environments
 __pycache__/
 *.pyc
-
-# Python virtualenvs
 venv/
 .venv/
 
 # Secrets — never commit
 .env
+
+# Generated and temporary files
+temp/
+src/test_run*
+
+# Local datasets
+**/rec_datasets/**/*.csv
+**/KuaiRand-Pure/
