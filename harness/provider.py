@@ -3,7 +3,7 @@
 Switch providers by setting LLM_PROVIDER in .env:
   LLM_PROVIDER=anthropic   → model defaults to claude-haiku-4-5-20251001
   LLM_PROVIDER=groq        → model defaults to openai/gpt-oss-120b
-  LLM_PROVIDER=gemini      → model defaults to gemini-2.0-flash
+  LLM_PROVIDER=gemini      → model defaults to gemini-3.5-flash-lite
   LLM_PROVIDER=ollama      → model defaults to llama3.2
   LLM_PROVIDER=openai      → model defaults to gpt-4o-mini
 
@@ -25,6 +25,7 @@ class ToolCall:
     id:    str
     name:  str
     input: dict
+    provider_metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -34,6 +35,8 @@ class LLMResponse:
     stop_reason:   str               # "end_turn" | "tool_use" | "length"
     input_tokens:  int
     output_tokens: int
+    reasoning_summary: str | None = None  # concise user-visible decision summary
+    provider_metadata: dict = field(default_factory=dict)
 
 
 # Abstract client interface
@@ -157,6 +160,16 @@ class OpenAICompatClient(LLMClient):
             for t in tools
         ]
 
+    @staticmethod
+    def _extra_content(value: object) -> dict:
+        """Copy opaque vendor metadata without inspecting or transforming it."""
+        extra = getattr(value, "extra_content", None)
+        if extra is None and hasattr(value, "model_dump"):
+            extra = value.model_dump(exclude_none=True).get("extra_content")
+        if hasattr(extra, "model_dump"):
+            extra = extra.model_dump(exclude_none=True)
+        return dict(extra) if isinstance(extra, dict) else {}
+
     def complete(self, messages, tools=None, max_tokens=4096) -> LLMResponse:
         kwargs: dict = {"model": self._model, "max_tokens": max_tokens, "messages": messages}
         if tools:
@@ -168,37 +181,52 @@ class OpenAICompatClient(LLMClient):
         tool_calls: list[ToolCall] = []
         if msg.tool_calls:
             for tc in msg.tool_calls:
+                tool_extra = self._extra_content(tc)
                 tool_calls.append(ToolCall(
                     id=tc.id,
                     name=tc.function.name,
                     input=json.loads(tc.function.arguments),
+                    provider_metadata={"extra_content": tool_extra} if tool_extra else {},
                 ))
 
         finish = response.choices[0].finish_reason or "stop"
+        message_extra = self._extra_content(msg)
         return LLMResponse(
             text=msg.content,
             tool_calls=tool_calls,
             stop_reason=self._STOP_MAP.get(finish, "end_turn"),
             input_tokens=response.usage.prompt_tokens,
             output_tokens=response.usage.completion_tokens,
+            provider_metadata={"extra_content": message_extra} if message_extra else {},
         )
 
     def add_response_to_history(self, messages, response: LLMResponse) -> None:
         msg: dict = {"role": "assistant", "content": response.text or ""}
         if response.tool_calls:
-            msg["tool_calls"] = [
-                {
+            native_calls = []
+            for tc in response.tool_calls:
+                native_call = {
                     "id": tc.id,
                     "type": "function",
                     "function": {"name": tc.name, "arguments": json.dumps(tc.input)},
                 }
-                for tc in response.tool_calls
-            ]
+                extra_content = tc.provider_metadata.get("extra_content")
+                if extra_content:
+                    native_call["extra_content"] = extra_content
+                native_calls.append(native_call)
+            msg["tool_calls"] = native_calls
+        message_extra = response.provider_metadata.get("extra_content")
+        if message_extra:
+            msg["extra_content"] = message_extra
         messages.append(msg)
 
     def add_tool_results_to_history(self, messages, tool_calls, outputs) -> None:
         for tc, out in zip(tool_calls, outputs):
-            messages.append({"role": "tool", "tool_call_id": tc.id, "content": out})
+            result = {"role": "tool", "tool_call_id": tc.id, "content": out}
+            # Gemini 3.x identifies function responses by both call ID and name.
+            if tc.provider_metadata.get("extra_content"):
+                result["name"] = tc.name
+            messages.append(result)
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +246,7 @@ _PROVIDER_DEFAULTS: dict[str, dict] = {
     },
     "gemini": {
         "requires_api_key": True,
-        "model":    "gemini-2.0-flash",
+        "model":    "gemini-3.5-flash-lite",
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
     },
     "ollama": {
@@ -271,5 +299,4 @@ def make_client() -> LLMClient:
 
     if provider == "anthropic":
         return AnthropicClient(api_key=api_key, model=model)
-    else:
-        return OpenAICompatClient(api_key=api_key, model=model, base_url=base_url or None)
+    return OpenAICompatClient(api_key=api_key, model=model, base_url=base_url or None)

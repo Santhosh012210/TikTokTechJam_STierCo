@@ -41,7 +41,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Load .env before anything reads os.environ
 _load_dotenv(_PROJECT_ROOT / ".env")
 
-
 # ---------------------------------------------------------------------------
 # Config class
 # ---------------------------------------------------------------------------
@@ -72,6 +71,13 @@ class Config:
     ITERATION_BUDGET:         int   = 10       # dev default; prod = 50
     WALL_BUDGET_S:            float = 1800.0   # 30 min dev; prod = 14400
     STRATEGIST_EVERY_N:       int   = 8
+
+    # Conservative provider-agnostic request and read limits.
+    AGENT_MAX_OUTPUT_TOKENS:      int   = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "2048"))
+    AGENT_REFLECTION_MAX_TOKENS:  int   = int(os.environ.get("AGENT_REFLECTION_MAX_TOKENS", "768"))
+    AGENT_READ_MAX_CHARS:         int   = int(os.environ.get("AGENT_READ_MAX_CHARS", "6000"))
+    PROVIDER_RETRY_DELAY_S:       float = float(os.environ.get("PROVIDER_RETRY_DELAY_S", "1"))
+    RATE_LIMIT_RETRY_DELAY_S:     float = float(os.environ.get("RATE_LIMIT_RETRY_DELAY_S", "60"))
 
     SEED:    int   = 42
     UCB_C:   float = 1.414

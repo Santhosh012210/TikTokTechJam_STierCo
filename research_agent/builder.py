@@ -9,13 +9,13 @@ Given a hypothesis and a parent code path, the builder:
   4. Self-repairs on error (up to max_turns).
   5. Returns structured BuilderResult.
 """
-import json
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from dataclasses import dataclass
 from pathlib import Path
 
 from harness.config import Config
+from harness.metrics import try_extract_metrics
 from harness.provider import LLMClient, LLMResponse, make_client
 from harness.tools import BUILDER_TOOLS, dispatch_tool_call, redact_secrets
 
@@ -53,23 +53,6 @@ _ERROR_MARKERS = (
 
 def is_error_output(text: str) -> bool:
     return any(marker in text for marker in _ERROR_MARKERS)
-
-
-def try_extract_metrics(text: str) -> dict | None:
-    """Scan output lines for a JSON line containing GAUC and primary."""
-    for line in reversed(text.splitlines()):
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            obj = json.loads(line)
-            if isinstance(obj, dict) and "GAUC" in obj and "primary" in obj:
-                primary = obj.get("primary", -1)
-                if isinstance(primary, (float, int)) and 0.0 <= float(primary) <= 1.0:
-                    return obj
-        except json.JSONDecodeError:
-            continue
-    return None
 
 
 def _builder_prompt(config: Config, hypothesis: str, parent_code_path: str, node_id: int) -> str:

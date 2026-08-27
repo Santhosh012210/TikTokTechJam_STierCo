@@ -6,6 +6,7 @@ Run standalone:
 python -m harness.validator artifacts/runs/<run_id>/logs/events.jsonl
 """
 import json
+import ast
 import re
 import sys
 from datetime import datetime
@@ -30,6 +31,35 @@ def scan_candidate_source(source: str) -> list[str]:
     for pattern, description in FORBIDDEN_PATTERNS:
         if re.search(pattern, source, re.IGNORECASE):
             violations.append(f"{description} (pattern: {pattern})")
+
+    # Catch aliases (data['test']) and simple computed keys
+    # (splits['te' + 'st']) that the regex layer cannot recognize.
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return violations
+
+    def constant_string(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = constant_string(node.left)
+            right = constant_string(node.right)
+            if left is not None and right is not None:
+                return left + right
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and constant_string(node.slice) == "test":
+            message = "subscript access to the test split"
+            if message not in violations:
+                violations.append(message)
+        if isinstance(node, ast.Call):
+            for arg in node.args:
+                if constant_string(arg) == "test":
+                    message = "function call referencing the test split"
+                    if message not in violations:
+                        violations.append(message)
     return violations
 
 
@@ -64,7 +94,14 @@ STRATEGIST_EXTRA: dict[str, type | tuple] = {
     "proposed_hypotheses": list,
 }
 
-VALID_SESSION_TYPES = {"builder", "strategist"}
+AGENT_EXTRA: dict[str, type | tuple] = {
+    "reasoning": str,
+    "reflection": str,
+    "execution_attempts": list,
+    "recovery_events": list,
+}
+
+VALID_SESSION_TYPES = {"builder", "strategist", "agent"}
 VALID_STATUSES      = {"success", "failed", "rejected"}
 
 
@@ -128,6 +165,16 @@ def validate_row(row: dict, lineno: int = 0) -> list[str]:
             elif not isinstance(row[field], expected_type):
                 errors.append(
                     f"{prefix}strategist field '{field}' has wrong type "
+                    f"(got {type(row[field]).__name__})"
+                )
+
+    if row.get("session_type") == "agent":
+        for field, expected_type in AGENT_EXTRA.items():
+            if field not in row:
+                errors.append(f"{prefix}agent row missing field '{field}'")
+            elif not isinstance(row[field], expected_type):
+                errors.append(
+                    f"{prefix}agent field '{field}' has wrong type "
                     f"(got {type(row[field]).__name__})"
                 )
 

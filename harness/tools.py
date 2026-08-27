@@ -115,7 +115,7 @@ def exec_write_file(path: str, content: str, candidate_dir: Path) -> str:
     try:
         target = (candidate_dir / path).resolve()
         # Security: must stay inside candidate_dir
-        if not str(target).startswith(str(candidate_dir.resolve())):
+        if not target.is_relative_to(candidate_dir.resolve()):
             return f"ERROR: path '{path}' escapes the candidate directory"
         target.parent.mkdir(parents=True, exist_ok=True)
         # Atomic write via tmp file + rename
@@ -137,8 +137,8 @@ def exec_read_file(path: str, candidate_dir: Path, starter_kit_root: Path) -> st
 
         # Allow reads from candidate_dir or starter_kit_root only
         allowed = (
-            str(p).startswith(str(candidate_dir.resolve()))
-            or str(p).startswith(str(starter_kit_root.resolve()))
+            p.is_relative_to(candidate_dir.resolve())
+            or p.is_relative_to(starter_kit_root.resolve())
         )
         if not allowed:
             return (

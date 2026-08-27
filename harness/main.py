@@ -144,7 +144,7 @@ for ep in range(40):
 
 m.V, m.W, m.b = best_state
 result = evaluate(uva, yva, m.predict(Xva))
-print(json.dumps(result))
+print(json.dumps({{key: float(value) for key, value in result.items()}}))
 '''
 
 
