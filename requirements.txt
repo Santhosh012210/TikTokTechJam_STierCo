@@ -1,0 +1,6 @@
+# Numerical computing
+numpy
+
+# LLM provider SDKs
+anthropic
+openai

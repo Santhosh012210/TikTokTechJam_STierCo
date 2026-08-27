@@ -35,7 +35,7 @@ kuairand-starter-kit/     organiser starter kit — read-only reference (baselin
 KuaiRand-Pure/            dataset (downloaded separately, gitignored)
 candidates/               one folder per experiment (auto-created)
 logs/                     JSONL run logs (auto-created)
-requirements-*.txt        per-LLM-provider dependency lists
+requirements.txt          Python dependencies for all supported LLM providers
 SETUP.md                  full first-time setup guide
 ```
 
@@ -65,7 +65,7 @@ See **[SETUP.md](SETUP.md)** for the full walkthrough (Windows + Mac/Linux). In 
 ```bash
 cd kuairand-starter-kit
 python -m venv venv && source venv/bin/activate      # venv\Scripts\Activate.ps1 on Windows
-pip install -r ../requirements-anthropic.txt          # or -groq / -gemini / -ollama
+pip install -r ../requirements.txt
 cd .. && cp .env.example .env                         # then add your API key
 
 # verify the baseline reproduces (run from repo root)

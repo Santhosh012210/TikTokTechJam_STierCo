@@ -37,7 +37,7 @@ TikTokTechJam_STierCo/         ← project root (this repo)
   harness/                     ← autonomous research agent code
   candidates/                  ← auto-created: one folder per experiment
   logs/                        ← auto-created: JSONL run logs
-  requirements-*.txt           ← per-provider dependency lists
+  requirements.txt             ← Python dependencies for all providers
   .env                         ← your API key (created in step 5, never committed)
   .env.example
   SETUP.md                     ← this file
@@ -77,74 +77,15 @@ Your prompt will now show `(venv)` when the environment is active.
 
 ## 4. Install dependencies
 
-Run these from **inside `kuairand-starter-kit/`** with the venv active. The requirements files live one level up, at the project root.
-
-Choose the tab that matches your chosen LLM provider.
-
-### Option A — Anthropic (paid, cheapest with Haiku ~$1/full run)
+Run this from **inside `kuairand-starter-kit/`** with the venv active. The requirements file lives one level up, at the project root, and supports every LLM provider.
 
 **Windows:**
 ```powershell
-pip install -r ..\requirements-anthropic.txt
+pip install -r ..\requirements.txt
 ```
 **Mac/Linux:**
 ```bash
-pip install -r ../requirements-anthropic.txt
-```
-
-### Option B — Groq (free tier, Llama 3.3 70B, ~14 400 req/day)
-
-**Windows:**
-```powershell
-pip install -r ..\requirements-groq.txt
-```
-**Mac/Linux:**
-```bash
-pip install -r ../requirements-groq.txt
-```
-Get a free key at [console.groq.com](https://console.groq.com) — no credit card needed.
-
-### Option C — Google Gemini (free tier, 1 500 req/day)
-
-**Windows:**
-```powershell
-pip install -r ..\requirements-gemini.txt
-```
-**Mac/Linux:**
-```bash
-pip install -r ../requirements-gemini.txt
-```
-Get a free key at [aistudio.google.com](https://aistudio.google.com).
-
-### Option D — Ollama (fully local, completely free)
-
-1. Download and install Ollama from [ollama.com](https://ollama.com).
-2. Pull a model (run once):
-   ```bash
-   ollama pull llama3.2        # ~2 GB, good balance
-   # or
-   ollama pull qwen2.5-coder   # better at code
-   ```
-3. Install the Python client:
-
-**Windows:**
-```powershell
-pip install -r ..\requirements-ollama.txt
-```
-**Mac/Linux:**
-```bash
-pip install -r ../requirements-ollama.txt
-```
-
-### Install everything (if you want to switch providers freely)
-
-**Windows:**
-```powershell
-pip install -r ..\requirements-all.txt
-```
-**Mac/Linux:**
-```bash
-pip install -r ../requirements-all.txt
+pip install -r ../requirements.txt
 ```
 
 ---
@@ -379,7 +320,7 @@ All paths are relative to the **project root** unless noted. `PY` = `kuairand-st
 | Task | Windows | Mac/Linux |
 |------|---------|-----------|
 | Activate venv (from `kuairand-starter-kit/`) | `venv\Scripts\Activate.ps1` | `source venv/bin/activate` |
-| Install deps (from `kuairand-starter-kit/`) | `pip install -r ..\requirements-<provider>.txt` | `pip install -r ../requirements-<provider>.txt` |
+| Install deps (from `kuairand-starter-kit/`) | `pip install -r ..\requirements.txt` | `pip install -r ../requirements.txt` |
 | Run baseline (from `kuairand-starter-kit/`) | `python baseline.py --model fm --data_dir "..\KuaiRand-Pure\KuaiRand-Pure\data"` | `python baseline.py --model fm --data_dir "../KuaiRand-Pure/KuaiRand-Pure/data"` |
 | Dev run | `PY harness\main.py --max-iter 10 --wall-hours 0.5 --builder-turns 2` | `PY harness/main.py --max-iter 10 --wall-hours 0.5 --builder-turns 2` |
 | Full run | `PY harness\main.py --max-iter 50 --wall-hours 4 --builder-turns 10` | `PY harness/main.py --max-iter 50 --wall-hours 4 --builder-turns 10` |
