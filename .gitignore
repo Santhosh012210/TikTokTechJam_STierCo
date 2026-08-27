@@ -4,6 +4,7 @@
 # Editor and local agent settings
 .vscode/
 .claude/
+CLAUDE.md
 
 # Python cache and virtual environments
 __pycache__/
