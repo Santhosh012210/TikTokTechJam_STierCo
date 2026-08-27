@@ -1,0 +1,63 @@
+{
+  "run_id": "20260827_174200",
+  "architecture": "single_persistent_agent",
+  "baseline_valid_primary": 0.6016,
+  "reproduced_baseline_valid_primary": 0.6018549203872681,
+  "best_trial": 1,
+  "best_valid_primary": 0.6026543378829956,
+  "delta_vs_baseline": 0.0010543378829955818,
+  "successful_agent_experiments": 1,
+  "tokens": {
+    "input": 28977,
+    "output": 1803
+  },
+  "manual_interventions": 0,
+  "best_workspace_code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260827_174200/trial_001/model.py",
+  "prompt_templates": [
+    {
+      "name": "single_agent.md",
+      "path": "research_agent/prompts/single_agent.md",
+      "template_sha256": "b1e254d8a17152138a8b546d7c18dec7135af6866d41c8c24c7683f9d1649636"
+    },
+    {
+      "name": "iteration.md",
+      "path": "research_agent/prompts/iteration.md",
+      "template_sha256": "f04352ee3e7f9702c1c7ffa7e35b291f5afd85aa77249f378d1271e121d2d354"
+    }
+  ],
+  "data_view_manifest": {
+    "source_logs": [
+      "log_standard_4_08_to_4_21_pure.csv",
+      "log_standard_4_22_to_5_08_pure.csv"
+    ],
+    "date_splits": {
+      "train": [
+        20220408,
+        20220421
+      ],
+      "valid": [
+        20220422,
+        20220428
+      ],
+      "test_excluded": [
+        20220429,
+        20220508
+      ]
+    },
+    "verified_source_counts": {
+      "train": 1141112,
+      "valid": 124909,
+      "test": 170588,
+      "outside": 0
+    },
+    "emitted_candidate_counts": {
+      "train": 1141112,
+      "valid": 124909,
+      "test": 0
+    },
+    "excluded_files": [
+      "log_random_4_22_to_5_08_pure.csv"
+    ],
+    "policy": "candidate processes receive train and validation rows only"
+  }
+}
