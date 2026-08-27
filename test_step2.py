@@ -12,8 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from harness.config import load_config
-from harness.builder import run_builder_session
+from agent_harness.config import load_config
+from agent_harness.builder import run_builder_session
 
 def main():
     config = load_config()
@@ -28,7 +28,7 @@ def main():
 
     # Give it the root model.py as parent
     root_mp = config.CANDIDATES_DIR / "iter_000" / "model.py"
-    parent = str(root_mp) if root_mp.exists() else str(config.STARTER_KIT_ROOT / "baseline.py")
+    parent = str(root_mp) if root_mp.exists() else str(config.BASELINE_ROOT / "baseline.py")
 
     result1 = run_builder_session(
         hypothesis=(

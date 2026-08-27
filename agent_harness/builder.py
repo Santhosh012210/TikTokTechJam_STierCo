@@ -1,6 +1,6 @@
 """Builder session: one LLM multi-turn loop per candidate.
 
-Provider-agnostic — all SDK calls go through harness.provider.LLMClient.
+Provider-agnostic — all SDK calls go through agent_harness.provider.LLMClient.
 
 Given a hypothesis and a parent code path, the builder:
   1. Reads the parent code.
@@ -15,9 +15,9 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness.config import Config
-from harness.provider import LLMClient, LLMResponse, make_client
-from harness.tools import BUILDER_TOOLS, dispatch_tool_call, redact_secrets
+from agent_harness.config import Config
+from agent_harness.provider import LLMClient, LLMResponse, make_client
+from agent_harness.tools import BUILDER_TOOLS, dispatch_tool_call, redact_secrets
 
 # ---------------------------------------------------------------------------
 # Result type
@@ -89,7 +89,7 @@ MANDATORY model.py CONTRACT — violating any rule = failure
 ════════════════════════════════════════════════════════════
 1. Start with EXACTLY these lines (before any other imports):
    import sys
-   sys.path.insert(0, r'{config.STARTER_KIT_ROOT}')
+   sys.path.insert(0, r'{config.BASELINE_ROOT}')
    from data import load, encode, FIELDS
    from evaluate import evaluate
    import json, argparse
@@ -183,7 +183,7 @@ def _run_session(
             outputs: list[str] = []
             for tc in response.tool_calls:
                 raw_output = dispatch_tool_call(
-                    tc.name, tc.input, candidate_dir, config.STARTER_KIT_ROOT
+                    tc.name, tc.input, candidate_dir, config.BASELINE_ROOT
                 )
 
                 if tc.name == "run_bash":

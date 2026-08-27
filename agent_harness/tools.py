@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from harness.validator import scan_candidate_source
+from agent_harness.validator import scan_candidate_source
 
 # ---------------------------------------------------------------------------
 # Tool schemas (Anthropic format)

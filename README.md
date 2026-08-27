@@ -12,7 +12,7 @@ converges or runs out of budget.
 
 ## Task
 
-Fixed by the organiser starter kit (`kuairand-starter-kit/`) — the protocol is not ours to change:
+Fixed by the organiser starter kit (`baseline_kuairand-starter-kit/`) — the protocol is not ours to change:
 
 | | |
 |---|---|
@@ -23,16 +23,16 @@ Fixed by the organiser starter kit (`kuairand-starter-kit/`) — the protocol is
 | **Baseline to beat** | FM — test primary **0.5946** (valid **0.6016**) |
 | **Ceiling** | oracle primary **0.8645** — real headroom is ~0.27, not ~0.41 |
 
-Full conventions live in `kuairand-starter-kit/evaluate.py` and its README.
+Full conventions live in `baseline_kuairand-starter-kit/evaluate.py` and its README.
 
 ---
 
 ## Repository layout
 
 ```
-harness/                  autonomous research agent (orchestration, builder, strategist, tree search)
-kuairand-starter-kit/     organiser starter kit — read-only reference (baseline.py, data.py, evaluate.py, submit.py)
-KuaiRand-Pure/            dataset (downloaded separately, gitignored)
+agent_harness/                     autonomous research agent (orchestration, builder, strategist, tree search)
+baseline_kuairand-starter-kit/     organiser starter kit — read-only reference
+datasets/                          dataset instructions; downloaded data is gitignored
 candidates/               one folder per experiment (auto-created)
 logs/                     JSONL run logs (auto-created)
 requirements.txt          Python dependencies for all supported LLM providers
@@ -45,13 +45,13 @@ SETUP.md                  full first-time setup guide
 
 | Module | Role |
 |---|---|
-| `harness/main.py` | Orchestration loop — tree search, convergence check, budget enforcement |
-| `harness/builder.py` | LLM session that implements one hypothesis as a candidate `model.py` and runs it |
-| `harness/strategist.py` | Periodic LLM session that reviews progress and proposes new research directions |
-| `harness/tree.py` | UCB tree search over hypotheses |
-| `harness/provider.py` | Provider-agnostic LLM client (Anthropic / Groq / Gemini / Ollama / OpenAI) — switch via `.env` |
-| `harness/logger.py` + `harness/validator.py` | Structured JSONL logging and schema validation |
-| `harness/config.py` | Single source of runtime constants and paths |
+| `agent_harness/main.py` | Orchestration loop — tree search, convergence check, budget enforcement |
+| `agent_harness/builder.py` | LLM session that implements one hypothesis as a candidate `model.py` and runs it |
+| `agent_harness/strategist.py` | Periodic LLM session that reviews progress and proposes new research directions |
+| `agent_harness/tree.py` | UCB tree search over hypotheses |
+| `agent_harness/provider.py` | Provider-agnostic LLM client (Anthropic / Groq / Gemini / Ollama / OpenAI) — switch via `.env` |
+| `agent_harness/logger.py` + `agent_harness/validator.py` | Structured JSONL logging and schema validation |
+| `agent_harness/config.py` | Single source of runtime constants and paths |
 
 Convergence rule (from the starter kit's 5-seed variance): ε = 0.002, N = 3 — three
 consecutive iterations with ≤0.002 validation gain means stop.
@@ -63,17 +63,17 @@ consecutive iterations with ≤0.002 validation gain means stop.
 See **[SETUP.md](SETUP.md)** for the full walkthrough (Windows + Mac/Linux). In short:
 
 ```bash
-cd kuairand-starter-kit
-python -m venv venv && source venv/bin/activate      # venv\Scripts\Activate.ps1 on Windows
-pip install -r ../requirements.txt
-cd .. && cp .env.example .env                         # then add your API key
+python3 -m venv .venv
+source .venv/bin/activate                            # .venv\Scripts\Activate.ps1 on Windows
+python -m pip install -r requirements.txt
+cp .env.example .env                                 # then add your API key
 
 # verify the baseline reproduces (run from repo root)
-kuairand-starter-kit/venv/bin/python kuairand-starter-kit/baseline.py \
-  --model fm --data_dir KuaiRand-Pure/KuaiRand-Pure/data
+python baseline_kuairand-starter-kit/baseline.py \
+  --model fm --data_dir datasets/KuaiRand-Pure/data
 
 # dev run of the harness (~30 min)
-kuairand-starter-kit/venv/bin/python harness/main.py --max-iter 10 --wall-hours 0.5 --builder-turns 2
+python -m agent_harness.main --max-iter 10 --wall-hours 0.5 --builder-turns 2
 ```
 
 ---

@@ -26,7 +26,8 @@ def _load_dotenv(path: Path) -> None:
             os.environ[k] = v
 
 
-# Project root = outer kuairand-starter-kit directory (contains harness/, candidates/, logs/)
+# Repository root (contains agent_harness/, baseline_kuairand-starter-kit/,
+# datasets/, candidates/, and logs/).
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Load .env before anything reads os.environ
@@ -39,13 +40,13 @@ _load_dotenv(_PROJECT_ROOT / ".env")
 
 class Config:
     # Paths
-    PROJECT_ROOT:    Path = _PROJECT_ROOT
-    STARTER_KIT_ROOT: Path = _PROJECT_ROOT / "kuairand-starter-kit"
-    DATA_DIR:        Path = _PROJECT_ROOT / "KuaiRand-Pure" / "KuaiRand-Pure" / "data"
-    CANDIDATES_DIR:  Path = _PROJECT_ROOT / "candidates"
-    LOGS_DIR:        Path = _PROJECT_ROOT / "logs"
-    HARNESS_DIR:     Path = _PROJECT_ROOT / "harness"
-    BASELINE_JSON:   Path = _PROJECT_ROOT / "kuairand-starter-kit" / "baseline_scores.json"
+    PROJECT_ROOT:   Path = _PROJECT_ROOT
+    BASELINE_ROOT:  Path = _PROJECT_ROOT / "baseline_kuairand-starter-kit"
+    DATA_DIR:       Path = _PROJECT_ROOT / "datasets" / "KuaiRand-Pure" / "data"
+    CANDIDATES_DIR: Path = _PROJECT_ROOT / "candidates"
+    LOGS_DIR:       Path = _PROJECT_ROOT / "logs"
+    HARNESS_DIR:    Path = _PROJECT_ROOT / "agent_harness"
+    BASELINE_JSON:  Path = BASELINE_ROOT / "baseline_scores.json"
 
     # Loaded from baseline_scores.json
     BASELINE_PRIMARY:     float = 0.6016
@@ -87,8 +88,8 @@ def load_config() -> Config:
     if not cfg.DATA_DIR.exists():
         raise FileNotFoundError(
             f"Data directory not found: {cfg.DATA_DIR}\n"
-            "Download KuaiRand-Pure from https://kuairand.com and place it at "
-            f"{cfg.PROJECT_ROOT / 'KuaiRand-Pure'}"
+            "Follow datasets/README.md to install KuaiRand-Pure at "
+            f"{cfg.PROJECT_ROOT / 'datasets' / 'KuaiRand-Pure'}"
         )
 
     # Load authoritative scores from baseline_scores.json
@@ -112,8 +113,10 @@ def load_config() -> Config:
     cfg.CANDIDATES_DIR.mkdir(parents=True, exist_ok=True)
     cfg.LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Resolve Python executable (prefer the venv Python in the starter kit)
-    venv_py = cfg.STARTER_KIT_ROOT / "venv" / "Scripts" / "python.exe"
+    # Resolve Python executable (prefer the repository-level virtual environment)
+    venv_py = cfg.PROJECT_ROOT / ".venv" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
     if venv_py.exists():
         cfg.PYTHON_EXE = str(venv_py)
 

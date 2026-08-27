@@ -1,6 +1,6 @@
 """Strategist session: single-turn LLM call that proposes research direction.
 
-Provider-agnostic — all SDK calls go through harness.provider.LLMClient.
+Provider-agnostic — all SDK calls go through agent_harness.provider.LLMClient.
 No tool calls — all context injected as text.
 The `reasoning` field is logged verbatim (graded deliverable).
 """
@@ -9,9 +9,9 @@ import re
 import time
 from dataclasses import dataclass
 
-from harness.config import Config
-from harness.provider import make_client
-from harness.tree import Node
+from agent_harness.config import Config
+from agent_harness.provider import make_client
+from agent_harness.tree import Node
 
 # ---------------------------------------------------------------------------
 # Result type

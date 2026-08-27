@@ -2,10 +2,10 @@
 
 Usage:
   # Dev run (fast feedback, 2 builder turns)
-  python harness/main.py --max-iter 10 --wall-hours 0.5 --builder-turns 2
+  python -m agent_harness.main --max-iter 10 --wall-hours 0.5 --builder-turns 2
 
-  # Production run (after harness verified)
-  python harness/main.py --max-iter 50 --wall-hours 4 --builder-turns 10
+  # Production run (after the agent harness is verified)
+  python -m agent_harness.main --max-iter 50 --wall-hours 4 --builder-turns 10
 """
 import argparse
 import difflib
@@ -15,17 +15,17 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Ensure harness package is importable when run from project root
+# Ensure the agent_harness package is importable when this file is run directly.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from harness.builder import BuilderResult, run_builder_session
-from harness.config import Config, load_config
-from harness.logger import RunLogger
-from harness.strategist import run_strategist_session
-from harness.tree import SearchTree
-from harness.validator import scan_candidate_source
+from agent_harness.builder import BuilderResult, run_builder_session
+from agent_harness.config import Config, load_config
+from agent_harness.logger import RunLogger
+from agent_harness.strategist import run_strategist_session
+from agent_harness.tree import SearchTree
+from agent_harness.validator import scan_candidate_source
 
 # ---------------------------------------------------------------------------
 # Seed knowledge (from research brief)
@@ -54,7 +54,7 @@ INITIAL_UNTRIED_DIRECTIONS: list[str] = [
 def make_root_model_py(config: Config) -> str:
     return f'''"""Root candidate: FM baseline (k=16, pointwise BCE) adapted for harness contract."""
 import sys
-sys.path.insert(0, r'{config.STARTER_KIT_ROOT}')
+sys.path.insert(0, r'{config.BASELINE_ROOT}')
 
 import argparse, json, time, collections
 import numpy as np
@@ -238,7 +238,7 @@ def assemble_builder_log(
 
 
 def assemble_strategist_log(iteration: int, strat, config: Config) -> dict:
-    from harness.strategist import StrategistResult
+    from agent_harness.strategist import StrategistResult
     return {
         "iteration":          iteration,
         "session_type":       "strategist",
@@ -503,9 +503,12 @@ def main() -> None:
         print(f"  Hypothesis: {best_node.hypothesis}")
     print("=" * 60)
     print("\nNext steps:")
-    print("  1. Review the log: harness/validator.py  logs/*.jsonl")
+    print("  1. Review the log: agent_harness/validator.py  logs/*.jsonl")
     print("  2. Run test eval on best candidate (ONE TIME ONLY)")
-    print("  3. Generate submission: python kuairand-starter-kit/submit.py --make --split test submission.csv")
+    print(
+        "  3. Generate submission: python baseline_kuairand-starter-kit/submit.py "
+        "submission.csv --make --split test --data_dir datasets/KuaiRand-Pure/data"
+    )
 
 
 if __name__ == "__main__":

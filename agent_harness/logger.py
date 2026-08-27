@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from harness.validator import validate_row
+from agent_harness.validator import validate_row
 
 
 class _NpEncoder(json.JSONEncoder):
