@@ -19,6 +19,7 @@ from harness.data_view import (
     EXPECTED_VALID_ROWS,
     classify_date,
 )
+from harness.logger import RunLogger
 from harness.provider import (
     LLMClient,
     LLMResponse,
@@ -393,6 +394,11 @@ def test_structured_console_separates_agent_and_harness_without_dumping_code():
         stop_reason="tool_use",
         input_tokens=120,
         output_tokens=40,
+        call_number=3,
+        response_event_id="llm_000003",
+        provider="gemini / test-model",
+        latency_seconds=1.25,
+        tool_summaries=["write_file(path=model.py, chars=35)"],
     )
     secret_code = "API_KEY_SHOULD_NOT_APPEAR = 'value'"
     run_console.agent_tool_call(
@@ -404,8 +410,10 @@ def test_structured_console_separates_agent_and_harness_without_dumping_code():
     assert "--- Harness ---" in rendered
     assert "--- Agent ---" in rendered
     assert "Reasoning: Testing a ranking-aware loss" in rendered
+    assert "LLM Call: #3 | llm_000003 | gemini / test-model | 1.25s" in rendered
     assert "LLM Response: line one" in rendered
     assert "Model Event: stop=tool_use; tokens in=120, out=40" in rendered
+    assert "Actions Requested: write_file(path=model.py, chars=35)" in rendered
     assert "line five … [response truncated]" in rendered
     assert "line six hidden" not in rendered
     assert f"Tool Calling: write_file(path=model.py, chars={len(secret_code)})" in rendered
@@ -626,6 +634,57 @@ print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
         assert validate_row(row) == []
 
 
+def test_llm_trace_records_provider_responses_and_safe_tool_results():
+    config = load_config()
+    source = """import argparse, json
+ap = argparse.ArgumentParser()
+ap.add_argument('--data_dir')
+ap.parse_args()
+print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
+"""
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        trial = root / "trial"
+        trial.mkdir()
+        (trial / "model.py").write_text(source, encoding="utf-8")
+        logger = RunLogger(root, "trace-test")
+        client = _FakeClient()
+        agent = ResearchAgent(
+            config,
+            client=client,
+            provider_retry_delay_s=0,
+            bootstrap_state=BootstrapState(required=False),
+            event_writer=logger.write_llm_event,
+            provider_label="fake / test-model",
+        )
+        result = agent.run_iteration(1, trial, 0.6016, 0.6016, max_turns=1)
+        totals = logger.running_totals()["llm_trace"]
+        trace_path = logger.llm_events_path
+        logger.close()
+
+        assert result.success
+        rows = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
+        responses = [row for row in rows if row["event_type"] == "llm_response"]
+        tool_results = [row for row in rows if row["event_type"] == "tool_result"]
+        assert len(responses) == 2
+        assert len(tool_results) == 2
+        assert totals["llm_response"] == 2
+        assert totals["tool_result"] == 2
+        assert responses[0]["phase"] == "experiment_1_turn_1"
+        assert responses[0]["stop_reason"] == "tool_use"
+        assert responses[0]["provider"] == "fake / test-model"
+        assert responses[1]["phase"] == "experiment_1_closing_reflection"
+        assert "unified loop returned metrics" in responses[1]["response_text"]
+        write_call = next(
+            call for call in responses[0]["tool_calls"] if call["name"] == "write_file"
+        )
+        assert "content" not in write_call["input"]
+        assert write_call["input"]["content_chars"] == len(_CHANGED_SCORING_MODEL)
+        assert len(write_call["input"]["content_sha256"]) == 64
+        assert _CHANGED_SCORING_MODEL not in trace_path.read_text(encoding="utf-8")
+        assert all(row["llm_response_id"] == "llm_000001" for row in tool_results)
+
+
 class _EndEarlyThenExecuteClient(_FakeClient):
     def complete(self, messages, tools=None, max_tokens=4096):
         self.calls += 1
@@ -706,11 +765,14 @@ def test_provider_errors_receive_exactly_one_retry():
         trial = Path(temp)
         _write_fake_scoring_model(trial)
         client = _RetryOnceClient()
+        trace_events = []
         agent = ResearchAgent(
             config,
             client=client,
             provider_retry_delay_s=0,
             bootstrap_state=BootstrapState(required=False),
+            event_writer=trace_events.append,
+            provider_label="fake / retry-model",
         )
         result = agent.run_iteration(1, trial, 0.6016, 0.6016, max_turns=1)
         assert result.success
@@ -718,6 +780,12 @@ def test_provider_errors_receive_exactly_one_retry():
         provider_events = [e for e in result.recovery_events if e["type"] == "provider_error"]
         assert len(provider_events) == 1
         assert provider_events[0]["action"] == "retry_once"
+        trace_errors = [e for e in trace_events if e["event_type"] == "provider_error"]
+        trace_responses = [e for e in trace_events if e["event_type"] == "llm_response"]
+        assert len(trace_errors) == 1
+        assert trace_errors[0]["will_retry"]
+        assert len(trace_responses) == 2
+        assert trace_responses[0]["provider_call_attempt"] == 2
 
 
 def test_prompt_templates_render_and_have_a_stable_hash():

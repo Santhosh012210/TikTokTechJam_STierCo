@@ -41,23 +41,24 @@ ls datasets/KuaiRand-Pure/data/*.csv | wc -l    # expect 6
 
 Downloaded data is gitignored — never commit the archive or the CSVs.
 
-## 4. LLM provider
+## 4. Google ADK and Gemini
 
 ```bash
 cp .env.example .env
 ```
 
-Uncomment exactly one provider block in `.env` — every provider uses the same variable
-names (`LLM_PROVIDER`, `LLM_API_KEY`, optionally `LLM_MODEL` / `LLM_BASE_URL`), and each
-block in the template carries its own default model. Ollama needs no API key.
+Set `GOOGLE_API_KEY` to a Gemini API key from Google AI Studio. The optional `ADK_MODEL`
+defaults to the low-cost `gemini-3.5-flash-lite` model.
 
-Switching providers later is a `.env` edit, not a code change; provider-specific code is
-confined to `harness/provider.py`.
+For a non-disruptive migration, an existing Gemini block using `LLM_PROVIDER=gemini`,
+`LLM_API_KEY`, and optional `LLM_MODEL` is also accepted by the ADK runner. The other
+provider blocks remain only for the legacy Builder/Strategist comparison runner.
 
 `.env` is gitignored. Never commit API keys.
 
-Gemini 3.x function calls include opaque thought signatures. The provider layer preserves
-and returns this metadata automatically; agent code and run logs never interpret it.
+Google ADK now owns the persistent conversation, Gemini function-calling protocol,
+automatic tool loop, and lifecycle callbacks. The Python harness still owns file and data
+boundaries, experiment execution, metric validation, and durable redacted logs.
 
 ## 5. Verify
 
@@ -76,6 +77,7 @@ Prints the dataset path and `0.6016`.
 
 ```bash
 python tests/test_knowledge.py
+python tests/test_adk_agent.py
 ```
 
 **Optional manual baseline preflight** (~40s, needs the dataset):
@@ -91,30 +93,36 @@ task documentation. If it does not match, the bootstrap stops before experiment 
 ## 6. Run the harness
 
 ```bash
-# single-agent dev run: one persistent agent owns the complete MLE loop
+# single-agent dev run: one persistent Google ADK session owns the complete MLE loop
 ./scripts/run_agent.sh
 
-# one-experiment smoke run: 12 bootstrap turns + 10 experiment turns, 30-minute wall budget
+# one-experiment smoke run: uncapped ADK calls, 30-minute outer wall budget
 ./scripts/run_agent_once.sh
 
 # full run, only after a dev run succeeds
 AGENT_MAX_ITER=50 AGENT_WALL_HOURS=4 AGENT_MAX_TURNS=10 ./scripts/run_agent.sh
 ```
 
-The single-agent defaults reserve at most 2,048 output tokens for work turns and 768
-for the closing reflection. Override with `AGENT_MAX_OUTPUT_TOKENS` and
-`AGENT_REFLECTION_MAX_TOKENS` and `AGENT_READ_MAX_CHARS` for a higher-limit provider or
-model.
-Rate-limit failures receive one retry after `RATE_LIMIT_RETRY_DELAY_S` (default 60 seconds).
-Bootstrap has a separate allowance, configurable with `AGENT_BOOTSTRAP_MAX_TURNS`
-(default 12), so task reading and baseline reproduction do not consume experiment turns.
+The ADK agent defaults to at most 2,048 output tokens per model call, but does not cap the
+number of calls. Override the output size with
+`AGENT_MAX_OUTPUT_TOKENS`; use `AGENT_READ_MAX_CHARS` to change the constrained file page
+size. Each ADK invocation receives one SDK-managed HTTP retry with exponential backoff
+bounded by `PROVIDER_RETRY_DELAY_S` and `RATE_LIMIT_RETRY_DELAY_S`.
+`AGENT_BOOTSTRAP_MAX_TURNS` and `AGENT_MAX_TURNS` default to `0`, meaning unlimited;
+positive values remain available as optional diagnostic caps.
+
+If the provider returns a quota/rate-limit error, the terminal asks: `You have hit your
+LLM limit. Would you like to resume when the limit has reset? [y/n]:`. After `y`, the
+harness waits for the advertised retry/reset delay and resumes the retained ADK session.
+Any later quota pauses in the same run wait and resume automatically without asking again.
 Interactive terminals receive colour-coded Agent/Harness debug output; set `NO_COLOR=1`
 to disable it or `FORCE_COLOR=1` to force ANSI colour output. Each Agent block includes
 up to five sanitized lines of the provider's assistant text. Function-call-only responses
 are labelled explicitly instead of being presented as hidden reasoning.
 
 Trial code goes to the gitignored `experiment_workspace/<run_id>/trial_NNN/`. Durable
-evidence goes to `artifacts/runs/<run_id>/` as `logs/events.jsonl`, `results/metrics.json`,
+evidence goes to `artifacts/runs/<run_id>/` as `logs/events.jsonl`,
+`logs/llm_events.jsonl`, `results/metrics.json`,
 and `reports/summary.md`. See `artifacts/README.md` for promoting a run to `artifacts/final/`.
 
 Check a run's log schema:
@@ -154,5 +162,5 @@ python tests/live_builder_smoke.py                 # live Builder check — cost
 | `ModuleNotFoundError: No module named 'harness'` | Run from the repo root, and invoke as `python -m harness.main` |
 | `FileNotFoundError: Data directory not found` | `datasets/KuaiRand-Pure/data/` is missing the CSVs — see `datasets/README.md` |
 | Baseline primary outside ±0.002 | Dataset is incomplete or wrong. Re-download; do not proceed |
-| Provider API key missing | `.env` needs `LLM_PROVIDER` and `LLM_API_KEY` (Ollama excepted) |
-| Ollama connection refused | Start Ollama and confirm its OpenAI-compatible endpoint is up |
+| Google ADK API key missing | Set `GOOGLE_API_KEY` in `.env` (or retain the old Gemini `LLM_PROVIDER=gemini` + `LLM_API_KEY` block) |
+| Gemini free-tier rate limit | Answer `y` at the recovery prompt to wait and resume automatically, or `n` to stop with the ADK trace preserved |

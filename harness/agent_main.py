@@ -1,8 +1,8 @@
-"""CLI for the single-agent autonomous MLE loop.
+"""CLI for the Google ADK-backed autonomous MLE loop.
 
 Usage:
     python -m harness.agent_main --max-iter 3 --wall-hours 0.5 \
-        --bootstrap-turns 12 --agent-turns 8
+        --bootstrap-turns 0 --agent-turns 0
 """
 from __future__ import annotations
 
@@ -14,13 +14,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from harness.adk_config import configure_google_adk_environment
 from harness.config import load_config
 from harness.console import console
 from harness.data_view import prepare_train_valid_view
 from harness.logger import RunLogger
-from harness.provider import validate_provider_environment
 from harness.root_model import make_root_model_py
-from research_agent.agent import AgentIterationResult, ResearchAgent
+from research_agent.adk_agent import AgentIterationResult, ResearchAgent
 
 
 def _now() -> str:
@@ -81,11 +81,19 @@ def _converged(best_history: list[float], epsilon: float, consecutive: int) -> b
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Single-agent KuaiRand MLE research loop")
+    parser = argparse.ArgumentParser(
+        description="Google ADK-backed KuaiRand MLE research loop"
+    )
     parser.add_argument("--max-iter", type=int, default=3)
     parser.add_argument("--wall-hours", type=float, default=0.5)
-    parser.add_argument("--agent-turns", type=int, default=8)
-    parser.add_argument("--bootstrap-turns", type=int, default=12)
+    parser.add_argument(
+        "--agent-turns", type=int, default=0,
+        help="Optional model-call cap per experiment; 0 means unlimited (default).",
+    )
+    parser.add_argument(
+        "--bootstrap-turns", type=int, default=0,
+        help="Optional bootstrap model-call cap; 0 means unlimited (default).",
+    )
     parser.add_argument("--data-dir", type=str, default=None)
     args = parser.parse_args()
     started = time.time()
@@ -94,7 +102,7 @@ def main() -> None:
     if args.data_dir:
         config.DATA_DIR = Path(args.data_dir).resolve()
     source_data_dir = config.DATA_DIR
-    provider = validate_provider_environment()
+    adk_settings = configure_google_adk_environment()
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     workspace = config.EXPERIMENT_WORKSPACE_DIR / run_id
     workspace.mkdir(parents=True, exist_ok=True)
@@ -106,25 +114,27 @@ def main() -> None:
     split_manifest = prepare_train_valid_view(source_data_dir, workspace / "candidate_data")
     config.DATA_DIR = workspace / "candidate_data"
     logger = RunLogger(config.ARTIFACTS_DIR, run_id)
+    experiment_calls = args.agent_turns if args.agent_turns > 0 else "unlimited"
+    bootstrap_calls = args.bootstrap_turns if args.bootstrap_turns > 0 else "unlimited"
 
     console.harness(
         "Run setup",
         run_id=run_id,
-        provider=f"{provider['provider']} / {provider['model']}",
+        provider=f"google-adk / {adk_settings.model}",
         experiment_budget=(
             f"{args.max_iter} experiments, {args.wall_hours}h, "
-            f"{args.agent_turns} turns/experiment"
+            f"{experiment_calls} model calls/experiment"
         ),
-        bootstrap_budget=f"{args.bootstrap_turns} turns (separate from experiments)",
+        bootstrap_budget=f"{bootstrap_calls} model calls (separate from experiments)",
         llm_limits=(
-            f"work output={config.AGENT_MAX_OUTPUT_TOKENS} tokens; "
-            f"reflection output={config.AGENT_REFLECTION_MAX_TOKENS} tokens; "
+            f"ADK model output={config.AGENT_MAX_OUTPUT_TOKENS} tokens/call; "
             f"read page={config.AGENT_READ_MAX_CHARS} chars"
         ),
         candidate_rows=(
             f"train={split_manifest['emitted_candidate_counts']['train']:,}; "
             f"validation={split_manifest['emitted_candidate_counts']['valid']:,}; test=0"
         ),
+        llm_trace=logger.llm_events_path,
     )
 
     root_dir = workspace / "trial_000"
@@ -132,7 +142,13 @@ def main() -> None:
     root_path = root_dir / "model.py"
     root_code = make_root_model_py(config)
     root_path.write_text(root_code, encoding="utf-8")
-    agent = ResearchAgent(config)
+    provider_label = f"google-adk / {adk_settings.model}"
+    agent = ResearchAgent(
+        config,
+        model=adk_settings.model,
+        event_writer=logger.write_llm_event,
+        provider_label=provider_label,
+    )
     console.harness(
         "Agent bootstrap",
         status=(
@@ -142,10 +158,16 @@ def main() -> None:
     )
     bootstrap_result = agent.run_bootstrap(root_dir, args.bootstrap_turns)
     if not bootstrap_result.success or not bootstrap_result.metrics:
-        logger.close()
-        raise RuntimeError(
-            f"Agent bootstrap/baseline reproduction failed: {bootstrap_result.error}"
+        console.harness(
+            "Agent bootstrap failed",
+            error=bootstrap_result.error,
+            action=(
+                "Review logs/llm_events.jsonl. Provider quota declines and non-quota "
+                "provider failures preserve the trace for diagnosis."
+            ),
         )
+        logger.close()
+        raise SystemExit(1)
     root_primary = float(bootstrap_result.metrics["primary"])
     console.harness(
         "Baseline accepted",
@@ -239,11 +261,20 @@ def main() -> None:
             best_history.append(best_primary)
         else:
             console.harness("Experiment failed", error=result.error)
+            if any(
+                event.get("action") == "user_declined_resume"
+                for event in result.recovery_events
+            ):
+                console.harness(
+                    "Run stopped",
+                    reason="User declined automatic provider-quota recovery",
+                )
+                break
 
     totals = logger.running_totals()
     results = {
         "run_id": run_id,
-        "architecture": "single_persistent_agent",
+        "architecture": "google_adk_persistent_agent",
         "baseline_valid_primary": config.BASELINE_PRIMARY,
         "reproduced_baseline_valid_primary": root_primary,
         "best_trial": best_iteration,
@@ -252,6 +283,7 @@ def main() -> None:
         "successful_agent_experiments": successful_agent_experiments,
         "tokens": totals["tokens"],
         "manual_interventions": totals["interventions"],
+        "llm_trace": totals["llm_trace"],
         "best_workspace_code_path": str(best_path),
         "prompt_templates": agent.prompt_evidence,
         "task_context_bootstrap": agent.bootstrap_evidence,
@@ -273,6 +305,11 @@ def main() -> None:
 - Input tokens: {totals['tokens']['input']}
 - Output tokens: {totals['tokens']['output']}
 - Manual interventions: {totals['interventions']}
+- LLM responses: {totals['llm_trace']['llm_response']}
+- Tool results: {totals['llm_trace']['tool_result']}
+- Provider errors: {totals['llm_trace']['provider_error']}
+- Quota pauses: {totals['llm_trace']['quota_pause']}
+- Detailed LLM trace: `{totals['llm_trace']['path']}`
 
 ## Prompt templates
 
@@ -288,15 +325,17 @@ def main() -> None:
 
 ## Architecture
 
-One persistent agent conversation owned EDA, research, hypothesis selection, code,
-execution, repair, and reflection. Python retained budgets, validation-only execution,
-baseline verification, and evidence logging.
+Google ADK owned the persistent session and model/tool event loop across EDA, research,
+hypothesis selection, code, execution, repair, and reflection. The retained Python
+harness enforced budgets, validation-only execution, baseline verification, and evidence
+logging.
 """)
     logger.close()
     console.harness(
         "Run artifacts",
         results=results_path,
         report=report_path,
+        llm_trace=logger.llm_events_path,
     )
 
 

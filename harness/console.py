@@ -66,10 +66,24 @@ class RunConsole:
         stop_reason: str | None = None,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        call_number: int | None = None,
+        response_event_id: str | None = None,
+        provider: str | None = None,
+        latency_seconds: float | None = None,
+        tool_summaries: list[str] | None = None,
     ) -> None:
         print(file=self.stream)
         print(self._style("--- Agent ---", _BOLD, _CYAN), file=self.stream)
         self._line("Phase", phase, _CYAN)
+        if call_number is not None:
+            call_parts = [f"#{call_number}"]
+            if response_event_id:
+                call_parts.append(response_event_id)
+            if provider:
+                call_parts.append(provider)
+            if latency_seconds is not None:
+                call_parts.append(f"{latency_seconds:.2f}s")
+            self._line("LLM Call", " | ".join(call_parts), _CYAN)
         self._line("Reasoning", reasoning)
         if progress:
             self._line("Progress", progress, _YELLOW)
@@ -78,6 +92,8 @@ class RunConsole:
             if input_tokens is not None and output_tokens is not None:
                 usage = f"; tokens in={input_tokens}, out={output_tokens}"
             self._line("Model Event", f"stop={stop_reason}{usage}", _CYAN)
+        if tool_summaries:
+            self._line("Actions Requested", " | ".join(tool_summaries), _YELLOW)
         self._response_preview(response_text, tool_names or [])
         self.stream.flush()
 
@@ -105,15 +121,15 @@ class RunConsole:
             print(f"  {self._style('│', _CYAN)} {line}", file=self.stream, flush=True)
 
     def agent_tool_call(self, name: str, payload: dict) -> None:
-        self._line("Tool Calling", self._tool_call_summary(name, payload), _YELLOW)
+        self._line("Tool Calling", self.tool_call_summary(name, payload), _YELLOW)
 
     def agent_tool_result(self, name: str, output: str) -> None:
         self._line("Tool Called", name, _GREEN)
-        summary, success = self._tool_result_summary(name, output)
+        summary, success = self.tool_result_summary(name, output)
         self._line("Returned Result", summary, _GREEN if success else _RED)
 
     @staticmethod
-    def _tool_call_summary(name: str, payload: dict) -> str:
+    def tool_call_summary(name: str, payload: dict) -> str:
         if name == "read_file":
             path = Path(str(payload.get("path", "?"))).name
             return f"read_file(path={path}, offset={payload.get('offset', 0)})"
@@ -133,7 +149,7 @@ class RunConsole:
         return f"{name}()"
 
     @staticmethod
-    def _tool_result_summary(name: str, output: str) -> tuple[str, bool]:
+    def tool_result_summary(name: str, output: str) -> tuple[str, bool]:
         safe_output = redact_secrets(output)
         try:
             payload = json.loads(safe_output)

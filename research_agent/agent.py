@@ -6,10 +6,13 @@ reflections in context across every experiment in a run.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from harness.agent_tools import AGENT_TOOLS, AgentToolRuntime, BootstrapState
 from harness.config import Config
@@ -85,6 +88,8 @@ class ResearchAgent:
         provider_retry_delay_s: float | None = None,
         rate_limit_retry_delay_s: float | None = None,
         bootstrap_state: BootstrapState | None = None,
+        event_writer: Callable[[dict], None] | None = None,
+        provider_label: str | None = None,
     ) -> None:
         self.config = config
         self.client = client or make_client()
@@ -105,6 +110,11 @@ class ResearchAgent:
         self.messages: list[dict] = [{"role": "user", "content": system_prompt.content}]
         self.bootstrap_state = bootstrap_state or BootstrapState()
         self._bootstrapped = self.bootstrap_state.complete
+        self._event_writer = event_writer
+        self._provider_label = provider_label or type(self.client).__name__
+        self._provider_call_attempts = 0
+        self._llm_response_count = 0
+        self._last_response_trace: dict[str, object] = {}
 
     @property
     def prompt_evidence(self) -> list[dict[str, str]]:
@@ -113,6 +123,85 @@ class ResearchAgent:
     @property
     def bootstrap_evidence(self) -> dict[str, object]:
         return self.bootstrap_state.evidence()
+
+    @staticmethod
+    def _now() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _digest(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _redacted_json_value(value: object) -> object:
+        encoded = json.dumps(value, ensure_ascii=False, default=str)
+        return json.loads(redact_secrets(encoded))
+
+    def _emit_trace_event(self, event: dict[str, object]) -> None:
+        if self._event_writer is not None:
+            self._event_writer(event)
+
+    def _safe_tool_call(self, tool_call) -> dict[str, object]:
+        payload = dict(tool_call.input)
+        if tool_call.name == "write_file" and "content" in payload:
+            content = redact_secrets(str(payload.pop("content")))
+            payload["content_chars"] = len(content)
+            payload["content_sha256"] = self._digest(content)
+        return {
+            "tool_call_id": tool_call.id,
+            "name": tool_call.name,
+            "summary": console.tool_call_summary(tool_call.name, tool_call.input),
+            "input": self._redacted_json_value(payload),
+        }
+
+    def _record_provider_response(
+        self,
+        response: LLMResponse,
+        *,
+        phase: str,
+        provider_attempt: int,
+        retry_attempt: int,
+        latency_seconds: float,
+        messages_before_call: int,
+    ) -> None:
+        self._llm_response_count += 1
+        response_id = f"llm_{self._llm_response_count:06d}"
+        response_text = redact_secrets(response.text or "")
+        trace = {
+            "event_type": "llm_response",
+            "timestamp": self._now(),
+            "llm_response_id": response_id,
+            "llm_response_number": self._llm_response_count,
+            "provider_call_attempt": provider_attempt,
+            "retry_attempt": retry_attempt,
+            "provider": self._provider_label,
+            "phase": phase,
+            "latency_seconds": latency_seconds,
+            "messages_before_call": messages_before_call,
+            "stop_reason": response.stop_reason,
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+            "decision_summary": _console_reasoning_line(response),
+            "response_text": response_text,
+            "response_text_chars": len(response_text),
+            "response_text_sha256": self._digest(response_text),
+            "tool_calls": [self._safe_tool_call(call) for call in response.tool_calls],
+        }
+        self._last_response_trace = trace
+        self._emit_trace_event(trace)
+
+    def _console_trace_fields(self, response: LLMResponse) -> dict[str, object]:
+        trace = self._last_response_trace
+        return {
+            "call_number": trace.get("llm_response_number"),
+            "response_event_id": trace.get("llm_response_id"),
+            "provider": trace.get("provider"),
+            "latency_seconds": trace.get("latency_seconds"),
+            "tool_summaries": [
+                console.tool_call_summary(call.name, call.input)
+                for call in response.tool_calls
+            ],
+        }
 
     def _bootstrap_progress(self) -> str:
         state = self.bootstrap_state
@@ -148,6 +237,8 @@ class ResearchAgent:
         self,
         runtime: AgentToolRuntime,
         response: LLMResponse,
+        *,
+        phase: str,
     ) -> list[str]:
         outputs: list[str] = []
         for tool_call in response.tool_calls:
@@ -155,6 +246,22 @@ class ResearchAgent:
             output = runtime.dispatch(tool_call.name, tool_call.input)
             outputs.append(output)
             console.agent_tool_result(tool_call.name, output)
+            output_safe = redact_secrets(output)
+            output_summary, success = console.tool_result_summary(tool_call.name, output_safe)
+            self._emit_trace_event({
+                "event_type": "tool_result",
+                "timestamp": self._now(),
+                "llm_response_id": self._last_response_trace.get("llm_response_id"),
+                "provider": self._provider_label,
+                "phase": phase,
+                "tool_call": self._safe_tool_call(tool_call),
+                "success": success,
+                "output_summary": output_summary,
+                "output_chars": len(output_safe),
+                "output_sha256": self._digest(output_safe),
+                "output_preview": output_safe[:1200],
+                "output_truncated": len(output_safe) > 1200,
+            })
         self.client.add_tool_results_to_history(self.messages, response.tool_calls, outputs)
         return outputs
 
@@ -167,8 +274,12 @@ class ResearchAgent:
     ) -> LLMResponse:
         """Call the provider with exactly one retry after an exception."""
         for attempt in range(2):
+            self._provider_call_attempts += 1
+            provider_attempt = self._provider_call_attempts
+            messages_before_call = len(self.messages)
+            call_started = time.time()
             try:
-                return self.client.complete(
+                response = self.client.complete(
                     self.messages, tools=tools, max_tokens=max_tokens
                 )
             except Exception as exc:
@@ -190,6 +301,19 @@ class ResearchAgent:
                     "action": "retry_once" if will_retry else "retry_exhausted",
                     "retry_delay_seconds": retry_delay if will_retry else 0,
                 })
+                self._emit_trace_event({
+                    "event_type": "provider_error",
+                    "timestamp": self._now(),
+                    "provider": self._provider_label,
+                    "phase": phase,
+                    "provider_call_attempt": provider_attempt,
+                    "retry_attempt": attempt + 1,
+                    "latency_seconds": time.time() - call_started,
+                    "messages_before_call": messages_before_call,
+                    "error": redact_secrets(error_text),
+                    "will_retry": will_retry,
+                    "retry_delay_seconds": retry_delay if will_retry else 0,
+                })
                 console.harness(
                     "Provider recovery",
                     phase=phase,
@@ -202,6 +326,20 @@ class ResearchAgent:
                     raise
                 if retry_delay > 0:
                     time.sleep(retry_delay)
+                continue
+
+            # Persist the successful response outside the provider-exception
+            # handler. A disk/logging failure must not be mistaken for a
+            # provider failure and trigger a duplicate billed request.
+            self._record_provider_response(
+                response,
+                phase=phase,
+                provider_attempt=provider_attempt,
+                retry_attempt=attempt + 1,
+                latency_seconds=time.time() - call_started,
+                messages_before_call=messages_before_call,
+            )
+            return response
         raise AssertionError("provider retry loop terminated unexpectedly")
 
     def run_bootstrap(
@@ -242,12 +380,13 @@ class ResearchAgent:
             self.messages.append({"role": "user", "content": bootstrap_prompt.content})
 
         for turn in range(max_turns):
+            phase = f"bootstrap_turn_{turn + 1}"
             try:
                 response = self._complete_with_one_retry(
                     tools=AGENT_TOOLS,
                     max_tokens=self.config.AGENT_MAX_OUTPUT_TOKENS,
                     recovery_events=recovery_events,
-                    phase=f"bootstrap_turn_{turn + 1}",
+                    phase=phase,
                 )
             except Exception as exc:
                 last_error = f"API error after one retry: {exc}"
@@ -264,11 +403,12 @@ class ResearchAgent:
                 stop_reason=response.stop_reason,
                 input_tokens=response.input_tokens,
                 output_tokens=response.output_tokens,
+                **self._console_trace_fields(response),
             )
             self.client.add_response_to_history(self.messages, response)
 
             if response.stop_reason == "tool_use":
-                self._dispatch_tool_calls(runtime, response)
+                self._dispatch_tool_calls(runtime, response, phase=phase)
                 if self.bootstrap_state.complete:
                     break
                 continue
@@ -391,12 +531,13 @@ class ResearchAgent:
         self.messages.append({"role": "user", "content": instruction})
 
         for turn in range(max_turns):
+            phase = f"experiment_{iteration}_turn_{turn + 1}"
             try:
                 response = self._complete_with_one_retry(
                     tools=AGENT_TOOLS,
                     max_tokens=self.config.AGENT_MAX_OUTPUT_TOKENS,
                     recovery_events=recovery_events,
-                    phase=f"experiment_{iteration}_turn_{turn + 1}",
+                    phase=phase,
                 )
             except Exception as exc:
                 last_error = f"API error after one retry: {exc}"
@@ -416,6 +557,7 @@ class ResearchAgent:
                 stop_reason=response.stop_reason,
                 input_tokens=response.input_tokens,
                 output_tokens=response.output_tokens,
+                **self._console_trace_fields(response),
             )
             if response.text:
                 last_text = response.text
@@ -425,7 +567,7 @@ class ResearchAgent:
             self.client.add_response_to_history(self.messages, response)
 
             if response.stop_reason == "tool_use":
-                self._dispatch_tool_calls(runtime, response)
+                self._dispatch_tool_calls(runtime, response, phase=phase)
                 if any(
                     tc.name == "run_model" and runtime.executions and runtime.executions[-1]["success"]
                     for tc in response.tool_calls
@@ -583,6 +725,7 @@ class ResearchAgent:
                     stop_reason=closing.stop_reason,
                     input_tokens=closing.input_tokens,
                     output_tokens=closing.output_tokens,
+                    **self._console_trace_fields(closing),
                 )
                 self.client.add_response_to_history(self.messages, closing)
                 if closing.text:

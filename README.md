@@ -3,7 +3,7 @@
 An **autonomous ML research agent** that tries to beat the official Factorization Machine
 baseline on the [KuaiRand-Pure](https://kuairand.com) within-user ranking benchmark.
 
-It runs one persistent LLM research session across the complete MLE loop: understand
+It runs one persistent Google ADK research session across the complete MLE loop: understand
 the benchmark, inspect train/validation data, research and propose a hypothesis,
 implement a self-contained candidate model, train and score it, repair failures, and
 reflect before the next experiment — until it converges or runs out of budget.
@@ -59,11 +59,12 @@ log are not exposed to candidate processes.
 | Module | Role |
 |---|---|
 | `harness/agent_main.py` | Single-agent run entrypoint — deterministic baseline, budgets, convergence, evidence |
-| `research_agent/agent.py` | One persistent agent session owning EDA, research, code, execution, repair, and reflection |
+| `research_agent/adk_agent.py` | Google ADK agent, persistent session, callbacks, event tracing, and tool adapters |
 | `harness/agent_tools.py` | Constrained agent tools — train/valid EDA, literature search, file editing, model execution |
 | `harness/main.py` + Builder/Strategist | Previous multi-session architecture retained temporarily for comparison |
 | `research_agent/knowledge/` | Local method corpus + offline BM25 `search_ml_literature` tool |
-| `harness/provider.py` | Provider-agnostic LLM client (Anthropic / Groq / Gemini / Ollama / OpenAI) — switch via `.env` |
+| `harness/adk_config.py` | Native Gemini/Google ADK configuration with legacy Gemini-env compatibility |
+| `harness/provider.py` | Provider abstraction retained only for the legacy comparison runner |
 | `harness/logger.py` + `harness/validator.py` | Structured JSONL logging and schema validation |
 | `harness/config.py` | Single source of runtime constants and paths |
 
@@ -90,6 +91,7 @@ tar -xzf datasets/KuaiRand-Pure.tar.gz -C datasets
 
 # offline checks — no API key, no dataset
 python tests/test_knowledge.py
+python tests/test_adk_agent.py
 
 # verify the baseline reproduces (needs the dataset, ~40s)
 python baseline_kuairand-starter-kit/baseline.py \
@@ -98,22 +100,26 @@ python baseline_kuairand-starter-kit/baseline.py \
 # single-agent dev run (3 experiments, up to 30 min)
 ./scripts/run_agent.sh
 
-# one-experiment smoke run (10 turns, up to 30 min)
+# one-experiment smoke run (unlimited ADK calls, up to 30 min)
 ./scripts/run_agent_once.sh
 
-# override the dev defaults when needed
-AGENT_MAX_ITER=5 AGENT_MAX_TURNS=10 ./scripts/run_agent.sh
+# optionally impose explicit call caps when diagnosing a runaway prompt/tool loop
+AGENT_MAX_ITER=5 AGENT_MAX_TURNS=20 AGENT_BOOTSTRAP_MAX_TURNS=20 ./scripts/run_agent.sh
 ```
 
-Before experiment 1, the agent gets a separate 12-turn bootstrap phase. It discovers the
+Before experiment 1, the ADK agent completes a separate uncapped bootstrap phase. It discovers the
 starter-kit task documentation, reads the complete README and required benchmark code
 through explicit pages, inspects the train/validation-only data view, searches the local
 literature corpus, explicitly reproduces the official baseline, and records one structured
 task summary. The harness blocks edits until this bootstrap is complete; the summary and
-baseline result then stay in the same conversation for every later experiment. The normal
-10-turn smoke-run budget is reserved for implementing, running, repairing, and reflecting
-on the actual experiment. Override the bootstrap allowance with
-`AGENT_BOOTSTRAP_MAX_TURNS` if needed.
+baseline result then stay in the same conversation for every later experiment. Model-call
+caps default to zero (unlimited); positive `AGENT_BOOTSTRAP_MAX_TURNS` or
+`AGENT_MAX_TURNS` values are optional diagnostic safeguards.
+
+When Gemini returns a real quota/rate-limit response, an interactive run asks once whether
+to resume after reset. Choosing `y` waits for the provider-advertised retry interval and
+automatically resumes the same ADK session. Later quota pauses in that run need no further
+human confirmation.
 
 ---
 

@@ -1,6 +1,12 @@
 # Core numerical dependency used by the official baseline and generated models.
 numpy
 
+# Active autonomous agent runtime. Google ADK owns the persistent session,
+# model/tool loop, callbacks, and events; Gemini inference is configured with
+# GOOGLE_API_KEY and ADK_MODEL.
+google-adk>=2.8.0,<3
+
+# Legacy Builder/Strategist comparison runner providers.
 # Anthropic provider (`LLM_PROVIDER=anthropic`).
 anthropic
 
@@ -11,4 +17,5 @@ anthropic
 # - Ollama OpenAI-compatible local endpoint (`LLM_PROVIDER=ollama`)
 openai
 
-# No separate `groq`, `google-genai`, or `ollama` Python packages are needed. The the harness uses their OpenAI-compatible APIs. 
+# No separate `groq` or `ollama` package is needed for the legacy runner; it
+# uses their OpenAI-compatible endpoints. Google ADK installs `google-genai`.

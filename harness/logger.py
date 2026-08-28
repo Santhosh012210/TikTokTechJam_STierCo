@@ -35,16 +35,29 @@ class RunLogger:
         self._results_dir = self._run_dir / "results"
         self._reports_dir = self._run_dir / "reports"
         self._path = self._logs_dir / "events.jsonl"
+        self._llm_events_path = self._logs_dir / "llm_events.jsonl"
         self._token_total: dict[str, int] = {"input": 0, "output": 0}
         self._intervention_count: int = 0
+        self._llm_event_sequence: int = 0
+        self._llm_event_counts: dict[str, int] = {
+            "llm_response": 0,
+            "tool_result": 0,
+            "provider_error": 0,
+            "quota_pause": 0,
+        }
         for directory in (self._logs_dir, self._results_dir, self._reports_dir):
             directory.mkdir(parents=True, exist_ok=True)
         # Open in append mode and keep handle open for the lifetime of the run
         self._file = open(self._path, "a", encoding="utf-8")
+        self._llm_events_file = open(self._llm_events_path, "a", encoding="utf-8")
 
     @property
     def path(self) -> Path:
         return self._path
+
+    @property
+    def llm_events_path(self) -> Path:
+        return self._llm_events_path
 
     @property
     def run_dir(self) -> Path:
@@ -80,10 +93,40 @@ class RunLogger:
             for e in errors:
                 print(f"[logger] schema warning: {e}", file=sys.stderr)
 
+    def write_llm_event(self, event: dict) -> None:
+        """Append one provider/tool trace event and fsync it before returning.
+
+        ``events.jsonl`` remains the compact experiment-level record. This
+        separate stream preserves the chronological agent trace without
+        changing the stable experiment schema.
+        """
+        row = dict(event)
+        self._llm_event_sequence += 1
+        row.setdefault("event_sequence", self._llm_event_sequence)
+        row.setdefault(
+            "timestamp", datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
+        event_type = str(row.get("event_type", "unknown"))
+        self._llm_event_counts[event_type] = self._llm_event_counts.get(event_type, 0) + 1
+
+        self._llm_events_file.write(
+            json.dumps(row, cls=_NpEncoder, ensure_ascii=False) + "\n"
+        )
+        self._llm_events_file.flush()
+        try:
+            os.fsync(self._llm_events_file.fileno())
+        except OSError:
+            pass
+
     def running_totals(self) -> dict:
         return {
             "tokens": dict(self._token_total),
             "interventions": self._intervention_count,
+            "llm_trace": {
+                "path": str(self._llm_events_path),
+                "events": self._llm_event_sequence,
+                **dict(self._llm_event_counts),
+            },
         }
 
     def write_results(self, results: dict) -> Path:
@@ -106,9 +149,10 @@ class RunLogger:
         return path
 
     def close(self) -> None:
-        try:
-            self._file.flush()
-            os.fsync(self._file.fileno())
-        except OSError:
-            pass
-        self._file.close()
+        for handle in (self._file, self._llm_events_file):
+            try:
+                handle.flush()
+                os.fsync(handle.fileno())
+            except OSError:
+                pass
+            handle.close()
