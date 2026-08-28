@@ -14,5 +14,6 @@ cd "$repo_dir"
 exec "$python_exe" -m harness.agent_main \
   --max-iter "${AGENT_MAX_ITER:-3}" \
   --wall-hours "${AGENT_WALL_HOURS:-0.5}" \
+  --bootstrap-turns "${AGENT_BOOTSTRAP_MAX_TURNS:-12}" \
   --agent-turns "${AGENT_MAX_TURNS:-8}" \
   "$@"

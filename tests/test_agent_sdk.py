@@ -2,14 +2,17 @@
 import json
 import sys
 import tempfile
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from harness.agent_main import _converged, _log_row
-from harness.agent_tools import AgentToolRuntime
+import harness.agent_tools as agent_tools_module
+from harness.agent_tools import AgentToolRuntime, BootstrapState
 from harness.config import load_config
+from harness.console import RunConsole
 from harness.data_view import (
     EXPECTED_TEST_ROWS,
     EXPECTED_TRAIN_ROWS,
@@ -93,7 +96,7 @@ def test_run_model_rejects_unchanged_and_comment_only_candidates():
         trial = Path(temp)
         initial = "value = 1\n"
         trial.joinpath("model.py").write_text(initial, encoding="utf-8")
-        runtime = AgentToolRuntime(trial, config)
+        runtime = AgentToolRuntime(trial, config, BootstrapState(required=False))
         payload = {"hypothesis": "Change behavior", "reasoning": "Test the guard."}
 
         unchanged = json.loads(runtime.dispatch("run_model", payload))
@@ -115,7 +118,7 @@ def test_run_model_accepts_a_semantically_changed_candidate():
     with tempfile.TemporaryDirectory() as temp:
         trial = Path(temp)
         trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
-        runtime = AgentToolRuntime(trial, config)
+        runtime = AgentToolRuntime(trial, config, BootstrapState(required=False))
         runtime.dispatch("write_file", {
             "path": "model.py",
             "content": _CHANGED_SCORING_MODEL,
@@ -127,6 +130,179 @@ def test_run_model_accepts_a_semantically_changed_candidate():
         assert result["success"]
         assert result["candidate_changed"]
         assert result["metrics"]["primary"] == 0.605
+
+
+def _task_context_payload(source_paths: list[str]) -> dict:
+    return {
+        "task_objective": "Improve within-user long-view ranking on KuaiRand.",
+        "target_label": "long_view",
+        "metrics": ["GAUC", "nDCG@5", "primary"],
+        "data_splits": {
+            "train": "20220408-20220421",
+            "validation": "20220422-20220428",
+            "test": "20220429-20220508; hidden and unavailable during development",
+        },
+        "baseline": "Official factorization-machine validation baseline.",
+        "evaluation_protocol": ["Train on train and score validation only."],
+        "hard_constraints": ["Never access the hidden test split."],
+        "known_dead_ends": ["Comment-only edits."],
+        "promising_directions": ["Evidence-backed ranking objectives."],
+        "candidate_contract": ["Accept --data_dir and print JSON metrics."],
+        "source_paths": source_paths,
+    }
+
+
+def test_bootstrap_gate_rejects_premature_context_edits_and_runs():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        state = BootstrapState()
+        runtime = AgentToolRuntime(trial, config, state)
+
+        early_context = json.loads(runtime.dispatch(
+            "record_task_context", _task_context_payload([])
+        ))
+        assert early_context["error"] == "BOOTSTRAP_SOURCES_INCOMPLETE"
+
+        early_write = json.loads(runtime.dispatch(
+            "write_file", {"path": "model.py", "content": "value = 2\n"}
+        ))
+        assert early_write["error"] == "BOOTSTRAP_REQUIRED"
+        assert trial.joinpath("model.py").read_text(encoding="utf-8") == "value = 1\n"
+
+        early_run = json.loads(runtime.dispatch("run_model", {
+            "hypothesis": "Premature change",
+            "reasoning": "Exercise the gate.",
+        }))
+        assert early_run["error"] == "BOOTSTRAP_REQUIRED"
+        assert runtime.executions == []
+        assert len(state.rejected_actions) == 3
+
+
+def test_bootstrap_requires_a_literature_query_with_retrieved_evidence():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        state = BootstrapState()
+        runtime = AgentToolRuntime(trial, config, state)
+
+        no_match = json.loads(runtime.dispatch("search_ml_literature", {
+            "query": "zzzz_nonexistent_method_zzzz",
+        }))
+        assert not no_match["bootstrap_counted"]
+        assert state.literature_queries == []
+
+        matched = json.loads(runtime.dispatch("search_ml_literature", {
+            "query": "within-user pairwise ranking loss",
+        }))
+        assert matched["bootstrap_counted"]
+        assert matched["results"]
+        assert state.literature_queries == ["within-user pairwise ranking loss"]
+
+
+def test_task_docs_are_discovered_and_long_reads_are_explicitly_paginated():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        starter = root / "starter"
+        trial = root / "trial"
+        starter.mkdir()
+        trial.mkdir()
+        readme_text = "0123456789" * 5
+        starter.joinpath("README.md").write_text(readme_text, encoding="utf-8")
+        starter.joinpath("evaluate.py").write_text("metric = 'primary'\n", encoding="utf-8")
+        starter.joinpath("data.py").write_text("SPLITS = {}\n", encoding="utf-8")
+        root.joinpath("README-outside.md").write_text("not discoverable", encoding="utf-8")
+        trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        config.BASELINE_ROOT = starter
+        state = BootstrapState()
+        runtime = AgentToolRuntime(trial, config, state)
+
+        discovery = json.loads(runtime.dispatch("discover_task_docs", {}))
+        assert discovery["primary_readme_path"] == str(starter.joinpath("README.md").resolve())
+        discovered = {item["relative_path"] for item in discovery["documents"]}
+        assert discovered == {"README.md", "evaluate.py", "data.py"}
+
+        first = json.loads(runtime.dispatch("read_file", {
+            "path": discovery["primary_readme_path"], "offset": 0, "max_chars": 17,
+        }))
+        assert first["content"] == readme_text[:17]
+        assert not first["complete"]
+        assert first["next_offset"] == 17
+
+        offset = first["next_offset"]
+        while offset is not None:
+            page = json.loads(runtime.dispatch("read_file", {
+                "path": discovery["primary_readme_path"],
+                "offset": offset,
+                "max_chars": 17,
+            }))
+            offset = page["next_offset"]
+        assert str(starter.joinpath("README.md").resolve()) in state.fully_read_paths
+
+
+def test_completed_task_context_persists_across_iteration_runtimes():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        starter = root / "starter"
+        first_trial = root / "trial_001"
+        second_trial = root / "trial_002"
+        starter.mkdir()
+        first_trial.mkdir()
+        second_trial.mkdir()
+        starter.joinpath("README.md").write_text("Task documentation.\n", encoding="utf-8")
+        starter.joinpath("evaluate.py").write_text("metric = 'primary'\n", encoding="utf-8")
+        starter.joinpath("baseline.py").write_text("MODEL = 'fm'\n", encoding="utf-8")
+        unread_source = starter / "data.py"
+        unread_source.write_text("SPLITS = {}\n", encoding="utf-8")
+        first_trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        second_trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        config.BASELINE_ROOT = starter
+        state = BootstrapState()
+        first_runtime = AgentToolRuntime(first_trial, config, state)
+
+        discovery = json.loads(first_runtime.dispatch("discover_task_docs", {}))
+        required_paths = [
+            discovery["primary_readme_path"],
+            str(starter.joinpath("baseline.py").resolve()),
+            str(starter.joinpath("evaluate.py").resolve()),
+            str(first_trial.joinpath("model.py").resolve()),
+        ]
+        for path in required_paths:
+            response = json.loads(first_runtime.dispatch("read_file", {"path": path}))
+            assert response["complete"]
+        state.data_inspected = True
+        state.literature_queries.append("ranking losses for recommender systems")
+        state.baseline_reproduced = True
+        state.baseline_metrics = {"GAUC": 0.6674, "nDCG@5": 0.5358, "primary": 0.6016}
+
+        rejected_context = json.loads(first_runtime.dispatch(
+            "record_task_context",
+            _task_context_payload(required_paths + [str(unread_source.resolve())]),
+        ))
+        assert rejected_context["error"] == "TASK_CONTEXT_INVALID"
+        assert rejected_context["cited_sources_not_fully_read"] == [
+            str(unread_source.resolve())
+        ]
+
+        recorded = json.loads(first_runtime.dispatch(
+            "record_task_context", _task_context_payload(required_paths)
+        ))
+        assert recorded["success"]
+        assert state.complete
+
+        second_runtime = AgentToolRuntime(second_trial, config, state)
+        write_result = second_runtime.dispatch(
+            "write_file", {"path": "model.py", "content": "value = 2\n"}
+        )
+        assert write_result.startswith("OK")
+        assert second_runtime.bootstrap_state.task_context == state.task_context
+        evidence = state.evidence()
+        assert evidence["complete"]
+        assert evidence["task_context"]["target_label"] == "long_view"
 
 
 def test_openai_compat_round_trips_gemini_thought_signature_opaquely():
@@ -204,6 +380,45 @@ def test_console_reasoning_prefers_summary_parses_reflection_and_has_fallback():
     assert _console_reasoning_line(fallback) == "Calling local tool: run_model."
 
 
+def test_structured_console_separates_agent_and_harness_without_dumping_code():
+    stream = StringIO()
+    run_console = RunConsole(stream=stream, use_color=False)
+    run_console.harness("Run setup", provider="gemini / test-model")
+    run_console.agent_reasoning(
+        "Testing a ranking-aware loss because pointwise FM under-optimizes ordering.",
+        phase="Experiment 1, turn 1/10",
+        progress="Execution attempts=0",
+        response_text="line one\nline two\nline three\nline four\nline five\nline six hidden",
+        tool_names=["write_file"],
+        stop_reason="tool_use",
+        input_tokens=120,
+        output_tokens=40,
+    )
+    secret_code = "API_KEY_SHOULD_NOT_APPEAR = 'value'"
+    run_console.agent_tool_call(
+        "write_file", {"path": "model.py", "content": secret_code}
+    )
+    run_console.agent_tool_result("write_file", "OK: wrote 35 bytes to model.py")
+    rendered = stream.getvalue()
+
+    assert "--- Harness ---" in rendered
+    assert "--- Agent ---" in rendered
+    assert "Reasoning: Testing a ranking-aware loss" in rendered
+    assert "LLM Response: line one" in rendered
+    assert "Model Event: stop=tool_use; tokens in=120, out=40" in rendered
+    assert "line five … [response truncated]" in rendered
+    assert "line six hidden" not in rendered
+    assert f"Tool Calling: write_file(path=model.py, chars={len(secret_code)})" in rendered
+    assert "Tool Called: write_file" in rendered
+    assert "Returned Result: OK: wrote 35 bytes to model.py" in rendered
+    assert secret_code not in rendered
+    assert "\033[" not in rendered
+
+    colour_stream = StringIO()
+    RunConsole(stream=colour_stream, use_color=True).harness("Colour check")
+    assert "\033[" in colour_stream.getvalue()
+
+
 class _FakeClient(LLMClient):
     def __init__(self):
         self.calls = 0
@@ -237,6 +452,145 @@ class _FakeClient(LLMClient):
         messages.append({"role": "user", "content": "\n".join(outputs)})
 
 
+class _BootstrapThenExecuteClient(_FakeClient):
+    def __init__(self, readme: Path, baseline: Path, evaluate: Path, model: Path):
+        super().__init__()
+        self.readme = str(readme.resolve())
+        self.baseline = str(baseline.resolve())
+        self.evaluate = str(evaluate.resolve())
+        self.model = str(model.resolve())
+
+    def complete(self, messages, tools=None, max_tokens=4096):
+        self.calls += 1
+        if self.calls == 1:
+            return LLMResponse(
+                text="Discovering and reading the task sources.",
+                tool_calls=[
+                    ToolCall(id="discover", name="discover_task_docs", input={}),
+                    ToolCall(
+                        id="read_readme_1", name="read_file",
+                        input={"path": self.readme, "offset": 0},
+                    ),
+                    ToolCall(
+                        id="read_baseline", name="read_file",
+                        input={"path": self.baseline, "offset": 0},
+                    ),
+                    ToolCall(
+                        id="read_evaluate", name="read_file",
+                        input={"path": self.evaluate, "offset": 0},
+                    ),
+                    ToolCall(
+                        id="read_model", name="read_file",
+                        input={"path": self.model, "offset": 0},
+                    ),
+                    ToolCall(id="inspect", name="inspect_data", input={}),
+                    ToolCall(
+                        id="literature", name="search_ml_literature",
+                        input={"query": "within-user pairwise ranking loss"},
+                    ),
+                ],
+                stop_reason="tool_use", input_tokens=10, output_tokens=4,
+            )
+        if self.calls == 2:
+            return LLMResponse(
+                text="Reading the remaining README page.",
+                tool_calls=[ToolCall(
+                        id="read_readme_2", name="read_file",
+                    input={"path": self.readme, "offset": 200},
+                )],
+                stop_reason="tool_use", input_tokens=10, output_tokens=3,
+            )
+        if self.calls == 3:
+            return LLMResponse(
+                text="Reproducing the unchanged official baseline.",
+                tool_calls=[ToolCall(
+                    id="reproduce_baseline", name="reproduce_baseline", input={},
+                )],
+                stop_reason="tool_use", input_tokens=10, output_tokens=3,
+            )
+        if self.calls == 4:
+            return LLMResponse(
+                text="Recording the retained task context after baseline reproduction.",
+                tool_calls=[ToolCall(
+                    id="record_context", name="record_task_context",
+                    input=_task_context_payload([
+                        self.readme, self.baseline, self.evaluate, self.model,
+                    ]),
+                )],
+                stop_reason="tool_use", input_tokens=10, output_tokens=4,
+            )
+        if self.calls == 5:
+            return LLMResponse(
+                text="Implementing and measuring the first hypothesis.",
+                tool_calls=_write_and_run_calls(
+                    "bootstrap_run",
+                    "Test a semantic model change after bootstrap",
+                    "The retained task context and ranking literature justify measuring it.",
+                ),
+                stop_reason="tool_use", input_tokens=10, output_tokens=5,
+            )
+        return LLMResponse(
+            text='{"reflection":"Bootstrap and execution completed.","hypothesis_supported":true,"suggested_next":"continue"}',
+            tool_calls=[], stop_reason="end_turn", input_tokens=8, output_tokens=4,
+        )
+
+
+def test_research_agent_completes_and_retains_the_bootstrap_before_running():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        starter = root / "starter"
+        trial = root / "trial"
+        starter.mkdir()
+        trial.mkdir()
+        readme = starter / "README.md"
+        baseline = starter / "baseline.py"
+        evaluate = starter / "evaluate.py"
+        model = trial / "model.py"
+        readme.write_text("A" * 300, encoding="utf-8")
+        baseline.write_text("MODEL = 'fm'\n", encoding="utf-8")
+        evaluate.write_text("metric = 'primary'\n", encoding="utf-8")
+        model.write_text(
+            """import argparse, json
+ap = argparse.ArgumentParser()
+ap.add_argument('--data_dir')
+ap.parse_args()
+print(json.dumps({'GAUC': 0.6674, 'nDCG@5': 0.5358, 'primary': 0.6016}))
+""",
+            encoding="utf-8",
+        )
+        config.BASELINE_ROOT = starter
+        config.AGENT_READ_MAX_CHARS = 200
+        client = _BootstrapThenExecuteClient(readme, baseline, evaluate, model)
+        original_inspector = agent_tools_module.inspect_train_valid_data
+        agent_tools_module.inspect_train_valid_data = lambda _config: {
+            "policy": "train and validation only",
+            "train": {"rows": 1_141_112},
+            "valid": {"rows": 124_909},
+        }
+        try:
+            agent = ResearchAgent(
+                config, client=client, provider_retry_delay_s=0,
+                bootstrap_state=BootstrapState(),
+            )
+            bootstrap = agent.run_bootstrap(trial, max_turns=4)
+            result = agent.run_iteration(1, trial, 0.6016, 0.6016, max_turns=1)
+        finally:
+            agent_tools_module.inspect_train_valid_data = original_inspector
+
+        assert bootstrap.success
+        assert bootstrap.metrics["primary"] == 0.6016
+        assert result.success
+        assert result.metrics["primary"] == 0.605
+        assert agent.bootstrap_evidence["complete"]
+        assert agent.bootstrap_evidence["task_context"]["target_label"] == "long_view"
+        assert any(
+            "TASK_CONTEXT_RECORDED_AND_RETAINED" in str(message.get("content"))
+            for message in agent.messages
+        )
+        assert client.calls == 6
+
+
 def test_single_agent_owns_a_persistent_tool_loop():
     config = load_config()
     source = """import argparse, json
@@ -249,7 +603,12 @@ print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
         trial = Path(temp)
         (trial / "model.py").write_text(source, encoding="utf-8")
         client = _FakeClient()
-        agent = ResearchAgent(config, client=client, provider_retry_delay_s=0)
+        agent = ResearchAgent(
+            config,
+            client=client,
+            provider_retry_delay_s=0,
+            bootstrap_state=BootstrapState(required=False),
+        )
         result = agent.run_iteration(1, trial, 0.6016, 0.6016, max_turns=1)
         assert result.success
         assert result.metrics["primary"] == 0.605
@@ -307,7 +666,12 @@ def test_agent_cannot_end_before_run_model_when_turns_remain():
         trial = Path(temp)
         _write_fake_scoring_model(trial)
         client = _EndEarlyThenExecuteClient()
-        agent = ResearchAgent(config, client=client, provider_retry_delay_s=0)
+        agent = ResearchAgent(
+            config,
+            client=client,
+            provider_retry_delay_s=0,
+            bootstrap_state=BootstrapState(required=False),
+        )
         result = agent.run_iteration(1, trial, 0.6016, 0.6016, max_turns=2)
         assert result.success
         assert client.calls == 3
@@ -342,7 +706,12 @@ def test_provider_errors_receive_exactly_one_retry():
         trial = Path(temp)
         _write_fake_scoring_model(trial)
         client = _RetryOnceClient()
-        agent = ResearchAgent(config, client=client, provider_retry_delay_s=0)
+        agent = ResearchAgent(
+            config,
+            client=client,
+            provider_retry_delay_s=0,
+            bootstrap_state=BootstrapState(required=False),
+        )
         result = agent.run_iteration(1, trial, 0.6016, 0.6016, max_turns=1)
         assert result.success
         assert client.calls == 3  # failed call + retry + closing reflection

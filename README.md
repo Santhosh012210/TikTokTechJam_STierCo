@@ -105,6 +105,16 @@ python baseline_kuairand-starter-kit/baseline.py \
 AGENT_MAX_ITER=5 AGENT_MAX_TURNS=10 ./scripts/run_agent.sh
 ```
 
+Before experiment 1, the agent gets a separate 12-turn bootstrap phase. It discovers the
+starter-kit task documentation, reads the complete README and required benchmark code
+through explicit pages, inspects the train/validation-only data view, searches the local
+literature corpus, explicitly reproduces the official baseline, and records one structured
+task summary. The harness blocks edits until this bootstrap is complete; the summary and
+baseline result then stay in the same conversation for every later experiment. The normal
+10-turn smoke-run budget is reserved for implementing, running, repairing, and reflecting
+on the actual experiment. Override the bootstrap allowance with
+`AGENT_BOOTSTRAP_MAX_TURNS` if needed.
+
 ---
 
 ## Known dead ends (measured by the organisers — don't re-test)
@@ -119,8 +129,9 @@ The agent is not handed a ranked list of things to try — that would make the h
 researcher and the agent the typist. Instead `research_agent/knowledge/` ships a corpus of
 19 established methods (ranking losses, sequence models, multi-task architectures,
 watch-time and debiasing methods, GBDT ranking), each covering what it is, why it helps a
-ranking metric, how to implement it, and **when it will not help**. The Strategist sees the
-catalogue and chooses; its reasoning lands in the run log.
+ranking metric, how to implement it, and **when it will not help**. The persistent single
+agent searches this catalogue, cites retrieved chunks in its experiment reasoning, and
+keeps that evidence beside the task summary in the run log.
 
 ```bash
 python -m research_agent.knowledge --list

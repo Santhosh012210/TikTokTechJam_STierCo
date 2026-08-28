@@ -78,14 +78,15 @@ Prints the dataset path and `0.6016`.
 python tests/test_knowledge.py
 ```
 
-**Baseline reproduction** (~40s, needs the dataset):
+**Optional manual baseline preflight** (~40s, needs the dataset):
 
 ```bash
 python baseline_kuairand-starter-kit/baseline.py --model fm --data_dir datasets/KuaiRand-Pure/data
 ```
 
-Validation primary must land within ±0.002 of `0.6016`. If it does not, stop and fix the
-dataset before running anything else — every downstream comparison is against this number.
+Validation primary must land within ±0.002 of `0.6016`. The autonomous runner performs
+this reproduction again through an explicit agent tool call after the agent has read the
+task documentation. If it does not match, the bootstrap stops before experiment 1.
 
 ## 6. Run the harness
 
@@ -93,7 +94,7 @@ dataset before running anything else — every downstream comparison is against 
 # single-agent dev run: one persistent agent owns the complete MLE loop
 ./scripts/run_agent.sh
 
-# one-experiment smoke run: 1 experiment, 10 turns, 30-minute wall budget
+# one-experiment smoke run: 12 bootstrap turns + 10 experiment turns, 30-minute wall budget
 ./scripts/run_agent_once.sh
 
 # full run, only after a dev run succeeds
@@ -105,6 +106,12 @@ for the closing reflection. Override with `AGENT_MAX_OUTPUT_TOKENS` and
 `AGENT_REFLECTION_MAX_TOKENS` and `AGENT_READ_MAX_CHARS` for a higher-limit provider or
 model.
 Rate-limit failures receive one retry after `RATE_LIMIT_RETRY_DELAY_S` (default 60 seconds).
+Bootstrap has a separate allowance, configurable with `AGENT_BOOTSTRAP_MAX_TURNS`
+(default 12), so task reading and baseline reproduction do not consume experiment turns.
+Interactive terminals receive colour-coded Agent/Harness debug output; set `NO_COLOR=1`
+to disable it or `FORCE_COLOR=1` to force ANSI colour output. Each Agent block includes
+up to five sanitized lines of the provider's assistant text. Function-call-only responses
+are labelled explicitly instead of being presented as hidden reasoning.
 
 Trial code goes to the gitignored `experiment_workspace/<run_id>/trial_NNN/`. Durable
 evidence goes to `artifacts/runs/<run_id>/` as `logs/events.jsonl`, `results/metrics.json`,
