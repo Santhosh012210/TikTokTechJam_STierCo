@@ -19,6 +19,7 @@ from harness.data_view import (
     EXPECTED_VALID_ROWS,
     classify_date,
 )
+from harness.hooks import PostFileSaveHook, run_post_file_save_hooks
 from harness.logger import RunLogger
 from harness.provider import (
     LLMClient,
@@ -52,6 +53,52 @@ def test_candidate_write_cannot_escape_to_prefix_sibling():
         result = exec_write_file("../trial_evil/escaped.py", "bad", root)
         assert result.startswith("ERROR")
         assert not (Path(temp) / "trial_evil" / "escaped.py").exists()
+
+
+def test_general_post_file_save_hook_uses_path_matcher_and_file_placeholder():
+    with tempfile.TemporaryDirectory() as temp:
+        target = Path(temp) / "generated" / "nested" / "example.txt"
+        target.parent.mkdir(parents=True)
+        target.write_text("saved", encoding="utf-8")
+        hook = PostFileSaveHook(
+            name="read-saved-file",
+            path_glob="generated/**/*.txt",
+            command=(
+                sys.executable,
+                "-c",
+                "import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text())",
+                "{file}",
+            ),
+        )
+
+        results = run_post_file_save_hooks(target, (hook,))
+
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].output == "saved"
+
+
+def test_model_post_file_save_hook_reports_syntax_error_immediately():
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp) / "experiment_workspace" / "run_001" / "trial_001"
+        trial.mkdir(parents=True)
+
+        result = exec_write_file("model.py", "def broken(:\n    pass\n", trial)
+
+        assert result.startswith("FAILED:")
+        assert "PostFileSave model-py-compile" in result
+        assert "SyntaxError" in result
+        assert trial.joinpath("model.py").exists()
+
+
+def test_model_post_file_save_hook_stays_silent_after_valid_save():
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp) / "experiment_workspace" / "run_001" / "trial_001"
+        trial.mkdir(parents=True)
+
+        result = exec_write_file("model.py", "value = 1\n", trial)
+
+        assert result == "OK: wrote 10 bytes to model.py"
 
 
 def test_fixed_organizer_date_splits_and_counts_are_pinned():

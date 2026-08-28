@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from harness.hooks import run_post_file_save_hooks
 from harness.validator import scan_candidate_source
 
 # ---------------------------------------------------------------------------
@@ -122,6 +123,18 @@ def exec_write_file(path: str, content: str, candidate_dir: Path) -> str:
         tmp = target.with_suffix(target.suffix + ".tmp")
         tmp.write_text(content, encoding="utf-8")
         tmp.replace(target)
+        hook_failures = [
+            result for result in run_post_file_save_hooks(target) if not result.success
+        ]
+        if hook_failures:
+            details = "\n".join(
+                f"PostFileSave {result.hook_name}: {result.output or 'failed'}"
+                for result in hook_failures
+            )
+            return (
+                f"FAILED: wrote {len(content)} bytes to {target.name}, but a "
+                f"PostFileSave hook failed:\n{details}"
+            )
         return f"OK: wrote {len(content)} bytes to {target.name}"
     except Exception as e:
         return f"ERROR: {e}"
