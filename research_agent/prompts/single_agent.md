@@ -29,12 +29,12 @@ strategist or builder; retain the complete research state in this conversation.
 # Benchmark authority
 
 - Official starter-kit directory: `${starter_kit_root}`
-- Official validation baseline primary: `${baseline_primary}`
 - Convergence/noise threshold: `${convergence_epsilon}`
-- Task: within-user ranking for `long_view`
-- Metrics: GAUC, nDCG@5, and their mean `primary`
 
-The starter-kit implementation is authoritative wherever other prose conflicts with it.
+Discover the task definition, target label, metrics, baseline values, evaluation details,
+measured dead ends, and promising directions from the starter-kit sources. Do not assume
+them from prior knowledge. The starter-kit implementation is authoritative wherever other
+prose conflicts with it.
 
 # Console progress
 
@@ -52,10 +52,9 @@ chain-of-thought or a long explanation.
 - Every research experiment must make a substantive Python change to the inherited
   `model.py` before `run_model`. The runtime rejects unchanged, comment-only, and
   formatting-only candidates; baseline reproduction is handled separately by trial 000.
-- Every candidate must print one JSON metrics object containing `GAUC`, `nDCG@5`, and
-  `primary`.
-- Do not repeat known dead ends: larger FM embeddings, the CWM static-feature bundle,
-  or pure user-side first-order terms.
+- Every candidate must preserve the inherited JSON metric-output contract expected by the
+  harness.
+- Do not repeat measured dead ends recorded in the retained task context.
 - Prefer evidence-backed pipeline changes over arbitrary hyperparameter sweeps.
 
 # Candidate contract
@@ -66,9 +65,29 @@ to ordinary Python values before `json.dumps`.
 
 # Complete loop
 
-At the beginning of the first experiment, use `inspect_data`, read the official README,
-evaluation code and inherited `model.py`, then use `search_ml_literature` before choosing
-a change. For every experiment:
+Before the first experiment, complete this separate bootstrap phase before editing the
+candidate:
+
+1. Call `discover_task_docs` to locate the task README and benchmark-support files.
+2. Read the primary README, official `baseline.py`, official `evaluate.py`, and inherited
+   candidate `model.py`.
+   `read_file` is paginated: whenever `complete` is false, call it again with the exact
+   `next_offset` until the whole file has been read.
+3. Call `inspect_data` for the enforced train/validation-only EDA.
+4. Call `search_ml_literature` with a query relevant to the observed benchmark and
+   baseline.
+5. Call `reproduce_baseline` while the inherited baseline `model.py` is still unchanged.
+   Interpret the returned validation metrics and confirm they match the official score.
+6. Call `record_task_context` with the most important objective, label, metrics, fixed
+   splits, baseline, evaluation protocol, constraints, dead ends, promising directions,
+   candidate contract, and source paths. Cite only sources you actually read completely.
+
+The harness rejects `write_file` and `run_model` until this checklist is complete. The
+recorded summary is retained in this persistent conversation and must be used alongside
+literature evidence in all later experiments. Python-enforced safety rules and fixed
+split policy override any conflicting prose in a discovered document.
+
+For every experiment:
 
 1. Inspect the inherited candidate and relevant evidence.
 2. State one precise hypothesis and why it may improve the fixed ranking metrics.

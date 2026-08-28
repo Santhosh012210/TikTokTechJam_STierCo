@@ -1,7 +1,8 @@
 """CLI for the single-agent autonomous MLE loop.
 
 Usage:
-    python -m harness.agent_main --max-iter 3 --wall-hours 0.5 --agent-turns 8
+    python -m harness.agent_main --max-iter 3 --wall-hours 0.5 \
+        --bootstrap-turns 12 --agent-turns 8
 """
 from __future__ import annotations
 
@@ -13,8 +14,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from harness.agent_tools import execute_model
 from harness.config import load_config
+from harness.console import console
 from harness.data_view import prepare_train_valid_view
 from harness.logger import RunLogger
 from harness.provider import validate_provider_environment
@@ -84,8 +85,10 @@ def main() -> None:
     parser.add_argument("--max-iter", type=int, default=3)
     parser.add_argument("--wall-hours", type=float, default=0.5)
     parser.add_argument("--agent-turns", type=int, default=8)
+    parser.add_argument("--bootstrap-turns", type=int, default=12)
     parser.add_argument("--data-dir", type=str, default=None)
     args = parser.parse_args()
+    started = time.time()
 
     config = load_config()
     if args.data_dir:
@@ -96,24 +99,32 @@ def main() -> None:
     workspace = config.EXPERIMENT_WORKSPACE_DIR / run_id
     workspace.mkdir(parents=True, exist_ok=True)
 
-    print("[agent] preparing count-verified train/validation-only data view...")
+    console.harness(
+        "Data preparation",
+        status="Preparing count-verified train/validation-only data view",
+    )
     split_manifest = prepare_train_valid_view(source_data_dir, workspace / "candidate_data")
     config.DATA_DIR = workspace / "candidate_data"
     logger = RunLogger(config.ARTIFACTS_DIR, run_id)
 
-    print(f"[agent] run_id={run_id}")
-    print(f"[agent] provider={provider['provider']} model={provider['model']}")
-    print(f"[agent] budget={args.max_iter} experiments, {args.wall_hours}h, {args.agent_turns} turns/experiment")
-    print(
-        "[agent] LLM budgets: "
-        f"work_output={config.AGENT_MAX_OUTPUT_TOKENS} "
-        f"reflection_output={config.AGENT_REFLECTION_MAX_TOKENS} tokens "
-        f"read_result={config.AGENT_READ_MAX_CHARS} chars"
-    )
-    print(
-        "[agent] candidate rows: "
-        f"train={split_manifest['emitted_candidate_counts']['train']:,} "
-        f"valid={split_manifest['emitted_candidate_counts']['valid']:,} test=0"
+    console.harness(
+        "Run setup",
+        run_id=run_id,
+        provider=f"{provider['provider']} / {provider['model']}",
+        experiment_budget=(
+            f"{args.max_iter} experiments, {args.wall_hours}h, "
+            f"{args.agent_turns} turns/experiment"
+        ),
+        bootstrap_budget=f"{args.bootstrap_turns} turns (separate from experiments)",
+        llm_limits=(
+            f"work output={config.AGENT_MAX_OUTPUT_TOKENS} tokens; "
+            f"reflection output={config.AGENT_REFLECTION_MAX_TOKENS} tokens; "
+            f"read page={config.AGENT_READ_MAX_CHARS} chars"
+        ),
+        candidate_rows=(
+            f"train={split_manifest['emitted_candidate_counts']['train']:,}; "
+            f"validation={split_manifest['emitted_candidate_counts']['valid']:,}; test=0"
+        ),
     )
 
     root_dir = workspace / "trial_000"
@@ -121,29 +132,41 @@ def main() -> None:
     root_path = root_dir / "model.py"
     root_code = make_root_model_py(config)
     root_path.write_text(root_code, encoding="utf-8")
-    print("[agent] reproducing FM baseline deterministically...")
-    root_execution = execute_model(root_dir, config)
-    if not root_execution.success:
-        logger.close()
-        raise RuntimeError(f"FM baseline reproduction failed: {root_execution.error}")
-    root_primary = float(root_execution.metrics["primary"])
-    if abs(root_primary - config.BASELINE_PRIMARY) > config.CONVERGENCE_EPSILON:
+    agent = ResearchAgent(config)
+    console.harness(
+        "Agent bootstrap",
+        status=(
+            "Agent will discover the task, inspect data, consult literature, and reproduce "
+            "the official FM baseline before experiment 1"
+        ),
+    )
+    bootstrap_result = agent.run_bootstrap(root_dir, args.bootstrap_turns)
+    if not bootstrap_result.success or not bootstrap_result.metrics:
         logger.close()
         raise RuntimeError(
-            f"FM baseline mismatch: got {root_primary:.6f}, expected {config.BASELINE_PRIMARY:.6f}"
+            f"Agent bootstrap/baseline reproduction failed: {bootstrap_result.error}"
         )
-    print(f"[agent] baseline valid primary={root_primary:.6f}")
+    root_primary = float(bootstrap_result.metrics["primary"])
+    console.harness(
+        "Baseline accepted",
+        validation_primary=f"{root_primary:.6f}",
+        official_primary=f"{config.BASELINE_PRIMARY:.6f}",
+        status="Agent reproduced the official baseline; research experiments may begin",
+    )
 
     root_result = AgentIterationResult(
         success=True,
-        hypothesis="Reproduce the official FM baseline",
-        reasoning="Deterministic preflight before autonomous research.",
-        reflection="Baseline reproduced successfully.",
-        metrics=root_execution.metrics,
+        hypothesis="Reproduce the official FM baseline after understanding the benchmark",
+        reasoning=(
+            "The agent discovered and read the task sources, inspected the allowed data, "
+            "and invoked the constrained baseline reproduction tool before proposing changes."
+        ),
+        reflection="The official baseline was reproduced and retained as experiment context.",
+        metrics=bootstrap_result.metrics,
         executions=[],
-        recovery_events=[],
-        token_counts={"input": 0, "output": 0},
-        wall_seconds=root_execution.wall_seconds,
+        recovery_events=bootstrap_result.recovery_events,
+        token_counts=bootstrap_result.token_counts,
+        wall_seconds=bootstrap_result.wall_seconds,
         error=None,
         final_code=root_code,
     )
@@ -152,20 +175,18 @@ def main() -> None:
         config.HEADROOM, "", root_path,
     ))
 
-    agent = ResearchAgent(config)
     best_primary = root_primary
     best_iteration = 0
     best_path = root_path
     best_history = [best_primary]
     successful_agent_experiments = 0
-    started = time.time()
 
     for iteration in range(1, args.max_iter + 1):
         if time.time() - started >= args.wall_hours * 3600:
-            print("[agent] wall-clock budget reached")
+            console.harness("Run stopped", reason="Wall-clock budget reached")
             break
         if _converged(best_history, config.CONVERGENCE_EPSILON, config.CONVERGENCE_N):
-            print("[agent] convergence reached")
+            console.harness("Run stopped", reason="Convergence rule reached")
             break
 
         trial_dir = workspace / f"trial_{iteration:03d}"
@@ -173,7 +194,11 @@ def main() -> None:
         trial_path = trial_dir / "model.py"
         shutil.copy2(best_path, trial_path)
         parent_code = trial_path.read_text(encoding="utf-8")
-        print(f"[agent] experiment {iteration}/{args.max_iter}")
+        console.harness(
+            "Experiment start",
+            experiment=f"{iteration}/{args.max_iter}",
+            inherited_primary=f"{best_primary:.6f}",
+        )
         result = agent.run_iteration(
             iteration, trial_dir, best_primary, best_primary, args.agent_turns
         )
@@ -199,12 +224,21 @@ def main() -> None:
                 best_primary = primary
                 best_iteration = iteration
                 best_path = trial_path
-                print(f"[agent] NEW BEST primary={primary:.6f}")
+                console.harness(
+                    "Experiment result",
+                    status="New best candidate",
+                    validation_primary=f"{primary:.6f}",
+                )
             else:
-                print(f"[agent] scored primary={primary:.6f}; best remains {best_primary:.6f}")
+                console.harness(
+                    "Experiment result",
+                    status="Candidate scored; incumbent retained",
+                    validation_primary=f"{primary:.6f}",
+                    best_primary=f"{best_primary:.6f}",
+                )
             best_history.append(best_primary)
         else:
-            print(f"[agent] failed: {result.error}")
+            console.harness("Experiment failed", error=result.error)
 
     totals = logger.running_totals()
     results = {
@@ -220,6 +254,7 @@ def main() -> None:
         "manual_interventions": totals["interventions"],
         "best_workspace_code_path": str(best_path),
         "prompt_templates": agent.prompt_evidence,
+        "task_context_bootstrap": agent.bootstrap_evidence,
         "data_view_manifest": split_manifest,
     }
     results_path = logger.write_results(results)
@@ -245,6 +280,12 @@ def main() -> None:
 {json.dumps(agent.prompt_evidence, indent=2)}
 ```
 
+## Retained task context bootstrap
+
+```json
+{json.dumps(agent.bootstrap_evidence, indent=2)}
+```
+
 ## Architecture
 
 One persistent agent conversation owned EDA, research, hypothesis selection, code,
@@ -252,8 +293,11 @@ execution, repair, and reflection. Python retained budgets, validation-only exec
 baseline verification, and evidence logging.
 """)
     logger.close()
-    print(f"[agent] results={results_path}")
-    print(f"[agent] report={report_path}")
+    console.harness(
+        "Run artifacts",
+        results=results_path,
+        report=report_path,
+    )
 
 
 if __name__ == "__main__":
