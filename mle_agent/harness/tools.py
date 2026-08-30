@@ -141,6 +141,35 @@ def exec_write_file(path: str, content: str, candidate_dir: Path) -> str:
         return f"ERROR: {e}"
 
 
+def exec_edit_file(
+    path: str, old_text: str, new_text: str, candidate_dir: Path
+) -> str:
+    """Apply one exact, unambiguous replacement inside the candidate directory."""
+    try:
+        target = (candidate_dir / path).resolve()
+        if not target.is_relative_to(candidate_dir.resolve()):
+            return f"ERROR: path '{path}' escapes the candidate directory"
+        if not target.is_file():
+            return f"ERROR: file not found: {target}"
+        content = target.read_text(encoding="utf-8")
+        matches = content.count(old_text)
+        if matches != 1:
+            return (
+                "ERROR: exact edit requires old_text to match once; "
+                f"found {matches} matches in {target.name}"
+            )
+        updated = content.replace(old_text, new_text, 1)
+        result = exec_write_file(path, updated, candidate_dir)
+        if result.startswith("OK:"):
+            return (
+                f"OK: edited {target.name}; replaced {len(old_text)} bytes with "
+                f"{len(new_text)} bytes"
+            )
+        return result
+    except Exception as exc:
+        return f"ERROR: {exc}"
+
+
 def exec_read_file(path: str, candidate_dir: Path, starter_kit_root: Path) -> str:
     try:
         p = Path(path)

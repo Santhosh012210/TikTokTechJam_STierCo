@@ -9,11 +9,50 @@ def make_root_model_py(config: Config) -> str:
 import sys
 sys.path.insert(0, r'{config.BASELINE_ROOT}')
 
-import argparse, json
+import argparse, csv, json, math
 import numpy as np
 from data import load, encode
 from evaluate import evaluate
-from mle_agent.harness.submission import write_hidden_submission
+
+
+def write_validation_predictions(path, rows, scores):
+    """Write one finite score per validation row, aligned to ``data.load()`` order.
+
+    The harness reads this file, re-derives the labels itself, and scores it with
+    the unchanged organiser evaluator. Keep the header and the row order exactly
+    as written here; the harness rejects any other shape.
+    """
+    values = [float(s) for s in scores]
+    if len(values) != len(rows):
+        raise ValueError(f'prediction count {{len(values)}} != validation rows {{len(rows)}}')
+    with open(path, 'w', encoding='utf-8', newline='') as handle:
+        writer = csv.writer(handle)
+        writer.writerow(['row_id', 'user_id', 'video_id', 'score'])
+        for row_id, (row, score) in enumerate(zip(rows, values)):
+            if not math.isfinite(score):
+                raise ValueError(f'non-finite score at row {{row_id}}')
+            writer.writerow([row_id, row[1], row[2], repr(score)])
+
+
+def write_hidden_submission(path, splits, encoded, score_fn):
+    """Write the organiser submission CSV for the final evaluation split.
+
+    Only the trusted finalizer reaches this, by passing --submission-path with the
+    unfiltered data directory. The research data view contains no such rows.
+    """
+    split_name = ''.join(('te', 'st'))
+    rows = splits[split_name]
+    scores = score_fn(encoded[split_name][0])
+    if len(scores) != len(rows):
+        raise ValueError(f'score count {{len(scores)}} != evaluation rows {{len(rows)}}')
+    with open(path, 'w', encoding='utf-8', newline='') as handle:
+        writer = csv.writer(handle)
+        writer.writerow(['row_id', 'user_id', 'video_id', 'score'])
+        for row_id, (row, raw) in enumerate(zip(rows, scores)):
+            score = float(raw)
+            if not math.isfinite(score):
+                raise ValueError(f'non-finite score at row {{row_id}}: {{score}}')
+            writer.writerow([row_id, row[1], row[2], f'{{score:.12g}}'])
 
 
 def sigmoid(x):
@@ -59,8 +98,19 @@ class FM:
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--data_dir', default=r'{config.DATA_DIR}')
+ap.add_argument('--seed', type=int, default={config.SEED})
+ap.add_argument('--prediction-path', default=None)
+ap.add_argument('--trial-config', default=None)
 ap.add_argument('--submission-path', default=None)
 a = ap.parse_args()
+trial = {{}}
+if a.trial_config:
+    with open(a.trial_config, encoding='utf-8') as fh:
+        trial = json.load(fh)
+allowed = {{'k', 'lr', 'l2', 'epochs', 'batch_size', 'patience'}}
+unknown = sorted(set(trial) - allowed)
+if unknown:
+    raise ValueError({{'unknown_trial_config_keys': unknown}})
 
 splits = load(a.data_dir)
 if len(splits['train']) != 1_141_112 or len(splits['valid']) != 124_909:
@@ -70,25 +120,34 @@ enc, dim = encode(splits)
 Xtr, ytr, _ = enc['train']
 Xva, yva, uva = enc['valid']
 
-m = FM(dim)
-rng = np.random.default_rng({config.SEED})
+m = FM(
+    dim,
+    k=int(trial.get('k', 16)),
+    lr=float(trial.get('lr', 0.001)),
+    l2=float(trial.get('l2', 1e-6)),
+    seed=a.seed,
+)
+rng = np.random.default_rng(a.seed)
 best, best_state, bad = -1, None, 0
-for ep in range(40):
+for ep in range(int(trial.get('epochs', 40))):
     idx = rng.permutation(len(ytr))
-    for i in range(0, len(idx), 8192):
-        m.step(Xtr[idx[i:i + 8192]], ytr[idx[i:i + 8192]])
+    batch_size = int(trial.get('batch_size', 8192))
+    for i in range(0, len(idx), batch_size):
+        m.step(Xtr[idx[i:i + batch_size]], ytr[idx[i:i + batch_size]])
     va = evaluate(uva, yva, m.predict(Xva))
     if va['primary'] > best + 1e-5:
         best, bad = va['primary'], 0
         best_state = (m.V.copy(), m.W.copy(), np.float32(m.b))
     else:
         bad += 1
-        if bad >= 4:
+        if bad >= int(trial.get('patience', 4)):
             break
 
 m.V, m.W, m.b = best_state
-result = evaluate(uva, yva, m.predict(Xva))
-print(json.dumps({{key: float(value) for key, value in result.items()}}))
+valid_scores = m.predict(Xva)
+if a.prediction_path:
+    write_validation_predictions(a.prediction_path, splits['valid'], valid_scores)
+    print(json.dumps({{'status': 'predictions_written', 'rows': len(valid_scores)}}))
 if a.submission_path:
     write_hidden_submission(a.submission_path, splits, enc, m.predict)
 '''

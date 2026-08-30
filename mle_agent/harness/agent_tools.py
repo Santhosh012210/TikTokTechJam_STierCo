@@ -12,6 +12,7 @@ import csv
 import hashlib
 import json
 import os
+import resource
 import subprocess
 from collections import Counter
 from dataclasses import dataclass, field
@@ -22,12 +23,17 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
 from mle_agent.harness.config import Config
-from mle_agent.harness.metrics import try_extract_metrics
+from mle_agent.harness.eda import (
+    build_eda_report,
+    query_aggregates,
+    summarize_eda_for_model,
+)
+from mle_agent.harness.evaluation import score_validation_predictions
 from mle_agent.harness.run_environment import (
     AUTO_INSTALL_ALLOWLIST,
     snapshot_run_environment,
 )
-from mle_agent.harness.tools import exec_write_file, redact_secrets
+from mle_agent.harness.tools import exec_edit_file, exec_write_file, redact_secrets
 from mle_agent.harness.validator import scan_candidate_source
 from mle_agent.research_agent.knowledge import SEARCH_ML_LITERATURE_TOOL, search_ml_literature
 
@@ -78,12 +84,53 @@ AGENT_TOOLS = [
         },
     },
     {
+        "name": "edit_file",
+        "description": (
+            "Make one exact old-text replacement in a candidate file. Prefer this over a full "
+            "rewrite for focused changes; the old text must match exactly once."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "old_text": {"type": "string"},
+                "new_text": {"type": "string"},
+            },
+            "required": ["path", "old_text", "new_text"],
+        },
+    },
+    {
         "name": "inspect_data",
         "description": (
             "Return a deterministic EDA summary and candidate-data column inventory made only "
             "from the training and validation view. The hidden test dates are never summarized."
         ),
         "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "query_data",
+        "description": (
+            "Run one bounded aggregate query over train or validation. Returns at most 20 "
+            "grouped rows and never returns raw interaction rows. Use only to resolve a "
+            "specific uncertainty left by inspect_data."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "split": {"type": "string", "enum": ["train", "validation"]},
+                "group_by": {
+                    "type": "array", "maxItems": 2,
+                    "items": {"type": "string"},
+                },
+                "metrics": {
+                    "type": "array", "minItems": 1, "maxItems": 5,
+                    "items": {"type": "string"},
+                },
+                "filters": {"type": "array", "maxItems": 3, "items": {"type": "object"}},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+            },
+            "required": ["split", "metrics"],
+        },
     },
     {
         "name": "inspect_environment",
@@ -238,6 +285,23 @@ AGENT_TOOLS = [
                 "rollback_plan": {
                     "type": "string",
                     "description": "How to return to the incumbent if the experiment fails.",
+                },
+                "seed": {
+                    "type": "integer",
+                    "description": "Reproducible training seed; defaults to the official seed.",
+                },
+                "trial_config": {
+                    "type": "object",
+                    "description": "Candidate-declared data-only hyperparameter configuration.",
+                },
+                "execution_class": {
+                    "type": "string",
+                    "enum": ["quick", "normal", "substantial"],
+                    "description": (
+                        "Propose an execution budget: 'quick' for a diagnostic, 'normal' for "
+                        "an ordinary candidate, 'substantial' for a framework-backed run. The "
+                        "harness decides the actual limit and may clamp it to the wall budget."
+                    ),
                 },
                 "feature_sources": {
                     "type": "array",
@@ -480,6 +544,11 @@ class ModelExecution:
     output: str
     error: str | None
     wall_seconds: float
+    prediction_path: str | None = None
+    prediction_sha256: str | None = None
+    seed: int | None = None
+    trial_config: dict[str, object] | None = None
+    resource_usage: dict[str, object] = field(default_factory=dict)
 
 
 def _safe_float_metrics(metrics: dict) -> dict:
@@ -489,20 +558,35 @@ def _safe_float_metrics(metrics: dict) -> dict:
     }
 
 
-def execute_model(candidate_dir: Path, config: Config, timeout_seconds: int = 300) -> ModelExecution:
-    """Run exactly ``model.py`` without allowing agent-authored shell commands."""
+def execute_model(
+    candidate_dir: Path,
+    config: Config,
+    timeout_seconds: int | None = None,
+    *,
+    seed: int | None = None,
+    trial_config: dict[str, object] | None = None,
+) -> ModelExecution:
+    """Run ``model.py`` and score its aligned predictions in trusted code."""
     import time
 
     started = time.time()
+    timeout_seconds = timeout_seconds or config.AGENT_NORMAL_EXECUTION_TIMEOUT_S
+    seed = config.SEED if seed is None else int(seed)
     model_path = candidate_dir / "model.py"
     if not model_path.exists():
-        return ModelExecution(False, None, "", "model.py does not exist", time.time() - started)
+        return ModelExecution(
+            False, None, "", "model.py does not exist", time.time() - started,
+            seed=seed, trial_config=trial_config,
+        )
 
     source = model_path.read_text(encoding="utf-8", errors="replace")
     violations = scan_candidate_source(source)
     if violations:
         message = f"REJECTED: validation-only policy violations: {violations}"
-        return ModelExecution(False, None, message, message, time.time() - started)
+        return ModelExecution(
+            False, None, message, message, time.time() - started,
+            seed=seed, trial_config=trial_config,
+        )
 
     env = {
         key: value
@@ -512,16 +596,32 @@ def execute_model(candidate_dir: Path, config: Config, timeout_seconds: int = 30
             "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY",
         }
     }
-    env["PYTHONPATH"] = os.pathsep.join((
-        str(config.BASELINE_ROOT),
-        str(config.PROJECT_ROOT),
-    ))
+    # Only the organiser starter kit is importable. The project root is deliberately
+    # absent so candidate code cannot import trusted harness modules across the
+    # boundary; the prediction and submission writers are inlined into the candidate.
+    env["PYTHONPATH"] = str(config.BASELINE_ROOT)
+    harness_dir = candidate_dir / ".harness"
+    harness_dir.mkdir(exist_ok=True)
+    prediction_path = harness_dir / f"validation_predictions_seed_{seed}.csv"
+    prediction_path.unlink(missing_ok=True)
     command = [
         config.PYTHON_EXE,
         str(model_path),
         "--data_dir",
         str(config.DATA_DIR),
+        "--seed",
+        str(seed),
+        "--prediction-path",
+        str(prediction_path),
     ]
+    if trial_config is not None:
+        trial_config_path = harness_dir / f"trial_config_seed_{seed}.json"
+        trial_config_path.write_text(
+            json.dumps(trial_config, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        command.extend(["--trial-config", str(trial_config_path)])
+    before_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
     try:
         result = subprocess.run(
             command,
@@ -534,23 +634,67 @@ def execute_model(candidate_dir: Path, config: Config, timeout_seconds: int = 30
     except subprocess.TimeoutExpired as exc:
         output = redact_secrets((exc.stdout or "") + (exc.stderr or ""))
         return ModelExecution(
-            False, None, output, f"TIMEOUT after {timeout_seconds}s", time.time() - started
+            False, None, output, f"TIMEOUT after {timeout_seconds}s", time.time() - started,
+            seed=seed, trial_config=trial_config,
+            resource_usage={"timeout_seconds": timeout_seconds},
         )
     except Exception as exc:
-        return ModelExecution(False, None, "", f"ERROR: {exc}", time.time() - started)
+        return ModelExecution(
+            False, None, "", f"ERROR: {exc}", time.time() - started,
+            seed=seed, trial_config=trial_config,
+        )
 
     output = redact_secrets(result.stdout + result.stderr)
     if len(output) > 12_000:
         output = output[-12_000:]
-    metrics = try_extract_metrics(output)
+    after_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    usage = {
+        "cpu_user_seconds": max(0.0, after_usage.ru_utime - before_usage.ru_utime),
+        "cpu_system_seconds": max(0.0, after_usage.ru_stime - before_usage.ru_stime),
+        "peak_rss_platform_units": after_usage.ru_maxrss,
+        "timeout_seconds": timeout_seconds,
+        "accelerator": "not_measured",
+    }
     if result.returncode != 0:
         error = f"model.py exited {result.returncode}\n{output[-6000:]}"
-        return ModelExecution(False, None, output, error, time.time() - started)
-    if metrics is None:
-        error = "model.py exited successfully but emitted no parseable validation metrics"
-        return ModelExecution(False, None, output, error, time.time() - started)
+        return ModelExecution(
+            False, None, output, error, time.time() - started,
+            seed=seed, trial_config=trial_config, resource_usage=usage,
+        )
+    if not prediction_path.is_file():
+        error = (
+            "model.py exited successfully but did not write the required aligned "
+            "validation prediction file"
+        )
+        return ModelExecution(
+            False, None, output, error, time.time() - started,
+            seed=seed, trial_config=trial_config, resource_usage=usage,
+        )
+    try:
+        scored = score_validation_predictions(
+            prediction_path,
+            config.DATA_DIR,
+            config.BASELINE_ROOT / "evaluate.py",
+        )
+    except (OSError, TypeError, ValueError, RuntimeError) as exc:
+        error = f"PREDICTION_VALIDATION_ERROR: {exc}"
+        return ModelExecution(
+            False, None, output, error, time.time() - started,
+            prediction_path=str(prediction_path), seed=seed,
+            trial_config=trial_config, resource_usage=usage,
+        )
+    prediction_sha256 = hashlib.sha256(prediction_path.read_bytes()).hexdigest()
     return ModelExecution(
-        True, _safe_float_metrics(metrics), output, None, time.time() - started
+        True,
+        _safe_float_metrics(scored.metrics),
+        output,
+        None,
+        time.time() - started,
+        prediction_path=str(prediction_path),
+        prediction_sha256=prediction_sha256,
+        seed=seed,
+        trial_config=trial_config,
+        resource_usage=usage,
     )
 
 
@@ -585,58 +729,19 @@ def _candidate_data_inventory(data_dir: Path) -> dict[str, object]:
 
 
 def inspect_train_valid_data(config: Config) -> dict[str, object]:
-    """Summarize only dates through the end of validation (2022-04-28)."""
+    """Return the cached rich EDA report for train and validation only."""
     cache_key = str(config.DATA_DIR.resolve())
     if cache_key in _EDA_CACHE:
         return _EDA_CACHE[cache_key]
-
-    split_stats = {
-        "train": {"rows": 0, "positives": 0, "users": Counter()},
-        "valid": {"rows": 0, "positives": 0, "users": Counter()},
-    }
-    auxiliary = Counter()
-    auxiliary_total = 0
-    files = (
-        config.DATA_DIR / "log_standard_4_08_to_4_21_pure.csv",
-        config.DATA_DIR / "log_standard_4_22_to_5_08_pure.csv",
-    )
-    aux_fields = ("is_click", "is_like", "is_follow", "is_comment", "is_forward")
-
-    for path in files:
-        with path.open(encoding="utf-8") as handle:
-            for row in csv.DictReader(handle):
-                date = int(row["date"])
-                if 20220408 <= date <= 20220421:
-                    split = "train"
-                elif 20220422 <= date <= 20220428:
-                    split = "valid"
-                else:
-                    continue
-                stats = split_stats[split]
-                stats["rows"] += 1
-                stats["positives"] += int(row.get("long_view", "0") != "0")
-                stats["users"][row["user_id"]] += 1
-                if split == "train":
-                    auxiliary_total += 1
-                    for field in aux_fields:
-                        auxiliary[field] += int(row.get(field, "0") not in ("", "0"))
-
-    summary: dict[str, object] = {"policy": "train and validation dates only; test excluded"}
-    for split, stats in split_stats.items():
-        counts = sorted(stats["users"].values())
-        rows = int(stats["rows"])
-        summary[split] = {
-            "rows": rows,
-            "users": len(counts),
-            "long_view_rate": round(int(stats["positives"]) / rows, 6) if rows else 0.0,
-            "impressions_per_user_p50": counts[len(counts) // 2] if counts else 0,
-            "impressions_per_user_p90": counts[int(0.9 * (len(counts) - 1))] if counts else 0,
-        }
-    summary["train_auxiliary_positive_rates"] = {
-        field: round(auxiliary[field] / auxiliary_total, 6) if auxiliary_total else 0.0
-        for field in aux_fields
-    }
-    summary["candidate_data"] = _candidate_data_inventory(config.DATA_DIR)
+    summary = build_eda_report(config.DATA_DIR)
+    if config.RUN_RESEARCH_DIR is not None:
+        config.RUN_RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
+        destination = config.RUN_RESEARCH_DIR / "eda.json"
+        destination.write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        summary["artifact_path"] = str(destination.resolve())
     _EDA_CACHE[cache_key] = summary
     return summary
 
@@ -896,13 +1001,19 @@ class AgentToolRuntime:
         bootstrap_state: BootstrapState | None = None,
         dependency_approver: Callable[[list[str], str], bool] | None = None,
         dependency_installer: Callable[[Config, list[str]], dict[str, object]] | None = None,
+        run_deadline: float | None = None,
     ) -> None:
         self.candidate_dir = candidate_dir
         self.config = config
+        # Epoch seconds at which the run's wall budget expires, or None when the
+        # caller does not enforce one (offline tests, single-shot tools).
+        self.run_deadline = run_deadline
         self.bootstrap_state = bootstrap_state or BootstrapState()
         self.dependency_approver = dependency_approver
         self.dependency_installer = dependency_installer or install_python_dependencies
         self.dependency_events: list[dict[str, object]] = []
+        self.data_query_events: list[dict[str, object]] = []
+        self._data_query_cache: dict[str, dict[str, object]] = {}
         self.executions: list[dict] = []
         self.model_post_save_failed = False
         self.inherited_model_fingerprint = semantic_model_fingerprint(
@@ -912,6 +1023,66 @@ class AgentToolRuntime:
             self.bootstrap_state.required_candidate_model_path = str(
                 (candidate_dir / "model.py").resolve()
             )
+
+    def grant_execution_timeout(self, requested_class: str) -> dict[str, object]:
+        """Decide the allowed execution timeout; the agent only proposes a class.
+
+        The agent names an execution class, but the harness owns the number. A
+        request is capped by the class ceiling and then clamped again to whatever
+        wall-clock the run has left, so a long execution can never push the run
+        past its budget. When too little time remains to finish even a quick
+        diagnostic, the execution is refused rather than started and killed.
+        """
+        ceilings = {
+            "quick": self.config.AGENT_QUICK_EXECUTION_TIMEOUT_S,
+            "normal": self.config.AGENT_NORMAL_EXECUTION_TIMEOUT_S,
+            "substantial": self.config.AGENT_SUBSTANTIAL_EXECUTION_TIMEOUT_S,
+        }
+        granted_class = requested_class if requested_class in ceilings else "normal"
+        timeout = ceilings[granted_class]
+        reason = f"requested class '{requested_class}' granted at {timeout}s"
+        if requested_class not in ceilings:
+            reason = f"unknown class '{requested_class}'; downgraded to normal ({timeout}s)"
+
+        if self.run_deadline is not None:
+            import time
+
+            remaining = self.run_deadline - time.time() - self.config.AGENT_WALL_RESERVE_S
+            if remaining < ceilings["quick"]:
+                return {
+                    "granted": False,
+                    "requested_class": requested_class,
+                    "granted_class": None,
+                    "timeout_seconds": 0,
+                    "remaining_wall_seconds": round(max(0.0, remaining), 1),
+                    "reason": (
+                        "WALL_BUDGET_EXHAUSTED: not enough wall-clock remains to run and "
+                        "score another candidate within the run budget"
+                    ),
+                }
+            if remaining < timeout:
+                timeout = int(remaining)
+                granted_class = "clamped"
+                reason = (
+                    f"requested class '{requested_class}' clamped to {timeout}s by the "
+                    "remaining wall budget"
+                )
+            return {
+                "granted": True,
+                "requested_class": requested_class,
+                "granted_class": granted_class,
+                "timeout_seconds": timeout,
+                "remaining_wall_seconds": round(remaining, 1),
+                "reason": reason,
+            }
+        return {
+            "granted": True,
+            "requested_class": requested_class,
+            "granted_class": granted_class,
+            "timeout_seconds": timeout,
+            "remaining_wall_seconds": None,
+            "reason": reason,
+        }
 
     def _bootstrap_rejection(self, action: str) -> str:
         missing = self.bootstrap_state.missing_requirements()
@@ -1011,10 +1182,68 @@ class AgentToolRuntime:
                 elif result.startswith("OK:"):
                     self.model_post_save_failed = False
             return result
+        if name == "edit_file":
+            if not self.bootstrap_state.complete:
+                return self._bootstrap_rejection("edit_file")
+            result = exec_edit_file(
+                str(payload["path"]),
+                str(payload["old_text"]),
+                str(payload["new_text"]),
+                self.candidate_dir,
+            )
+            target = (self.candidate_dir / str(payload["path"])).resolve()
+            if target == (self.candidate_dir / "model.py").resolve():
+                if result.startswith("FAILED:"):
+                    self.model_post_save_failed = True
+                elif result.startswith("OK:"):
+                    self.model_post_save_failed = False
+            return result
         if name == "inspect_data":
             summary = inspect_train_valid_data(self.config)
             self.bootstrap_state.data_inspected = True
-            return json.dumps(summary, indent=2)
+            # Return the digest, not the full report: this session is persistent, so
+            # whatever goes here is resent on every later model call.
+            return json.dumps(
+                summarize_eda_for_model(summary), ensure_ascii=False, indent=2
+            )
+        if name == "query_data":
+            if not self.bootstrap_state.data_inspected:
+                return json.dumps({
+                    "success": False,
+                    "error": "EDA_REQUIRED: call inspect_data before query_data",
+                }, indent=2)
+            key = hashlib.sha256(
+                json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()
+            cached = key in self._data_query_cache
+            try:
+                if cached:
+                    result = self._data_query_cache[key]
+                else:
+                    result = query_aggregates(self.config.DATA_DIR, payload)
+                    if len(self._data_query_cache) < self.config.EDA_QUERY_CACHE_LIMIT:
+                        self._data_query_cache[key] = result
+                event = {
+                    "type": "data_query",
+                    "query_sha256": key,
+                    "result_sha256": result["result_sha256"],
+                    "cached": cached,
+                    "success": True,
+                    "human_intervention": False,
+                }
+                self.data_query_events.append(event)
+                return json.dumps({**result, "cached": cached}, ensure_ascii=False, indent=2)
+            except (TypeError, ValueError, OSError) as exc:
+                event = {
+                    "type": "data_query",
+                    "query_sha256": key,
+                    "cached": False,
+                    "success": False,
+                    "error": f"INVALID_DATA_QUERY: {exc}",
+                    "human_intervention": False,
+                }
+                self.data_query_events.append(event)
+                return json.dumps(event, ensure_ascii=False, indent=2)
         if name == "inspect_environment":
             inventory = inspect_ml_environment(self.config)
             self.bootstrap_state.environment_inspected = True
@@ -1555,7 +1784,44 @@ class AgentToolRuntime:
                 self.executions.append(record)
                 return json.dumps(record, ensure_ascii=False, indent=2)
 
-            execution = execute_model(self.candidate_dir, self.config)
+            execution_class = str(payload.get("execution_class", "normal"))
+            requested_seed = int(payload.get("seed", self.config.SEED))
+            trial_config = payload.get("trial_config")
+            if trial_config is not None and not isinstance(trial_config, dict):
+                record = {
+                    "hypothesis": str(payload.get("hypothesis", "")),
+                    "reasoning": str(payload.get("reasoning", "")),
+                    "proposal": proposal,
+                    "success": False,
+                    "metrics": None,
+                    "error": "INVALID_TRIAL_CONFIG: trial_config must be an object",
+                    "wall_seconds": 0.0,
+                    "candidate_changed": True,
+                }
+                self.executions.append(record)
+                return json.dumps(record, ensure_ascii=False, indent=2)
+            grant = self.grant_execution_timeout(execution_class)
+            if not grant["granted"]:
+                record = {
+                    "hypothesis": str(payload.get("hypothesis", "")),
+                    "reasoning": str(payload.get("reasoning", "")),
+                    "proposal": proposal,
+                    "success": False,
+                    "metrics": None,
+                    "error": str(grant["reason"]),
+                    "wall_seconds": 0.0,
+                    "candidate_changed": True,
+                    "execution_grant": grant,
+                }
+                self.executions.append(record)
+                return json.dumps(record, ensure_ascii=False, indent=2)
+            execution = execute_model(
+                self.candidate_dir,
+                self.config,
+                timeout_seconds=int(grant["timeout_seconds"]),
+                seed=requested_seed,
+                trial_config=trial_config,
+            )
             record = {
                 "hypothesis": str(payload.get("hypothesis", "")),
                 "reasoning": str(payload.get("reasoning", "")),
@@ -1566,6 +1832,13 @@ class AgentToolRuntime:
                 "error": execution.error,
                 "wall_seconds": execution.wall_seconds,
                 "candidate_changed": True,
+                "seed": execution.seed,
+                "trial_config": execution.trial_config,
+                "prediction_path": execution.prediction_path,
+                "prediction_sha256": execution.prediction_sha256,
+                "resource_usage": execution.resource_usage,
+                "execution_class": execution_class,
+                "execution_grant": grant,
             }
             self.executions.append(record)
             if execution.success and candidate_fingerprint is not None:

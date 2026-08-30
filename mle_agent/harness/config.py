@@ -73,7 +73,13 @@ class Config:
     STRATEGIST_EVERY_N:       int   = 8
 
     # Conservative provider-agnostic request and read limits.
-    AGENT_MAX_OUTPUT_TOKENS:      int   = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "2048"))
+    # On Gemini thinking models max_output_tokens covers thinking tokens too, so a
+    # small cap is spent reasoning and the model never emits a tool call. Give the
+    # answer real room and bound thinking separately.
+    AGENT_MAX_OUTPUT_TOKENS:      int   = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "8192"))
+    AGENT_THINKING_BUDGET_TOKENS: int   = int(
+        os.environ.get("AGENT_THINKING_BUDGET_TOKENS", "2048")
+    )
     AGENT_REFLECTION_MAX_TOKENS:  int   = int(os.environ.get("AGENT_REFLECTION_MAX_TOKENS", "768"))
     AGENT_READ_MAX_CHARS:         int   = int(os.environ.get("AGENT_READ_MAX_CHARS", "6000"))
     AGENT_BOOTSTRAP_MAX_TURNS:    int   = int(
@@ -82,6 +88,12 @@ class Config:
     AGENT_MAX_TURNS:              int   = int(
         os.environ.get("AGENT_MAX_TURNS", "16")
     )
+    # Pre-approve bounded quota recovery for unattended runs. Without it an
+    # unattended run stops at the first per-minute rate limit, and the interactive
+    # prompt itself counts as a manual intervention.
+    AGENT_AUTO_RESUME_QUOTA: bool = os.environ.get(
+        "AGENT_AUTO_RESUME_QUOTA", ""
+    ).strip().lower() in {"1", "true", "yes"}
     AGENT_MAX_QUOTA_RESUMES:      int   = int(
         os.environ.get("AGENT_MAX_QUOTA_RESUMES", "3")
     )
@@ -100,6 +112,28 @@ class Config:
     BASE_PYTHON_EXE: str | None = None
     RUN_ENV_DIR: Path | None = None
     RUN_ENV_ARTIFACT_DIR: Path | None = None
+    RUN_RESEARCH_DIR: Path | None = None
+
+    # Trusted research-quality controls.
+    EDA_QUERY_CACHE_LIMIT: int = int(os.environ.get("EDA_QUERY_CACHE_LIMIT", "64"))
+    AGENT_NORMAL_EXECUTION_TIMEOUT_S: int = int(
+        os.environ.get("AGENT_NORMAL_EXECUTION_TIMEOUT_S", "600")
+    )
+    AGENT_SUBSTANTIAL_EXECUTION_TIMEOUT_S: int = int(
+        os.environ.get("AGENT_SUBSTANTIAL_EXECUTION_TIMEOUT_S", "1800")
+    )
+    AGENT_QUICK_EXECUTION_TIMEOUT_S: int = int(
+        os.environ.get("AGENT_QUICK_EXECUTION_TIMEOUT_S", "120")
+    )
+    # Wall-clock kept back from the last execution so finalization can still run.
+    AGENT_WALL_RESERVE_S: int = int(os.environ.get("AGENT_WALL_RESERVE_S", "300"))
+    AGENT_SWEEP_MAX_CONFIGS: int = int(
+        os.environ.get("AGENT_SWEEP_MAX_CONFIGS", "6")
+    )
+    AGENT_CANDIDATE_ARCHIVE_LIMIT: int = int(
+        os.environ.get("AGENT_CANDIDATE_ARCHIVE_LIMIT", "3")
+    )
+    AGENT_STABILITY_SEEDS: tuple[int, ...] = (42, 314, 2718)
 
 def load_config() -> Config:
     cfg = Config()

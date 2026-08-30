@@ -1,6 +1,7 @@
 """Offline checks for the single-agent runner and its safety boundaries."""
 import json
 import os
+import re
 import sys
 import tempfile
 from io import StringIO
@@ -28,6 +29,7 @@ from mle_agent.harness.data_view import (
     classify_date,
 )
 from mle_agent.harness.hooks import PostFileSaveHook, run_post_file_save_hooks
+from mle_agent.harness.evaluation import ScoredPredictions
 from mle_agent.harness.logger import RunLogger
 from mle_agent.harness.root_model import make_root_model_py
 from mle_agent.harness.run_environment import (
@@ -46,6 +48,21 @@ from mle_agent.harness.tools import exec_write_file
 from mle_agent.harness.validator import scan_candidate_source, validate_row
 from mle_agent.research_agent.agent import ResearchAgent, _console_reasoning_line
 from mle_agent.research_agent.prompts import render_prompt
+
+
+def _fake_trusted_scorer(path, *_args, **_kwargs):
+    source = (Path(path).parent.parent / "model.py").read_text(encoding="utf-8")
+    def metric(name: str, fallback: float) -> float:
+        match = re.search(rf"['\"]{re.escape(name)}['\"]\s*:\s*([0-9.]+)", source)
+        return float(match.group(1)) if match else fallback
+    return ScoredPredictions(
+        metrics={
+            "GAUC": metric("GAUC", 0.61),
+            "nDCG@5": metric("nDCG@5", 0.60),
+            "primary": metric("primary", 0.605),
+        },
+        rows=1,
+    )
 
 
 def test_convergence_requires_three_completed_no_gain_experiments():
@@ -89,7 +106,11 @@ def test_candidate_process_does_not_receive_google_api_key():
             trial = Path(temp)
             trial.joinpath("model.py").write_text(
                 "import json, os\n"
+                "import argparse\n"
+                "ap=argparse.ArgumentParser(); ap.add_argument('--data_dir'); ap.add_argument('--seed'); "
+                "ap.add_argument('--prediction-path'); ap.add_argument('--trial-config'); a=ap.parse_args()\n"
                 "print(os.environ.get('GOOGLE_API_KEY', '<missing>'))\n"
+                "open(a.prediction_path,'w').write('row_id,user_id,video_id,score\\n')\n"
                 "print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))\n",
                 encoding="utf-8",
             )
@@ -161,7 +182,7 @@ def test_run_model_skips_after_failed_save_until_model_is_repaired():
         execute_calls: list[Path] = []
         original_execute_model = agent_tools_module.execute_model
 
-        def fake_execute_model(candidate_dir, _config):
+        def fake_execute_model(candidate_dir, _config, **_kwargs):
             execute_calls.append(candidate_dir)
             return agent_tools_module.ModelExecution(
                 True,
@@ -252,8 +273,12 @@ def test_trusted_submission_writer_outputs_aligned_finite_scores():
 _CHANGED_SCORING_MODEL = """import argparse, json
 ap = argparse.ArgumentParser()
 ap.add_argument('--data_dir')
-ap.parse_args()
+ap.add_argument('--seed')
+ap.add_argument('--prediction-path')
+ap.add_argument('--trial-config')
+a = ap.parse_args()
 experiment_variant = 'semantic-change'
+open(a.prediction_path, 'w').write('row_id,user_id,video_id,score\\n')
 print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
 """
 
@@ -844,13 +869,17 @@ def test_research_agent_completes_and_retains_the_bootstrap_before_running():
             """import argparse, json
 ap = argparse.ArgumentParser()
 ap.add_argument('--data_dir')
-ap.parse_args()
+ap.add_argument('--seed')
+ap.add_argument('--prediction-path')
+ap.add_argument('--trial-config')
+a = ap.parse_args()
+open(a.prediction_path, 'w').write('row_id,user_id,video_id,score\\n')
 print(json.dumps({'GAUC': 0.6674, 'nDCG@5': 0.5358, 'primary': 0.6016}))
 """,
             encoding="utf-8",
         )
         config.BASELINE_ROOT = starter
-        config.AGENT_READ_MAX_CHARS = 200
+        config.AGENT_READ_MAX_CHARS = 400
         client = _BootstrapThenExecuteClient(
             readme, baseline, evaluate, data, feature_ablation, model
         )
@@ -885,12 +914,7 @@ print(json.dumps({'GAUC': 0.6674, 'nDCG@5': 0.5358, 'primary': 0.6016}))
 
 def test_single_agent_owns_a_persistent_tool_loop():
     config = load_config()
-    source = """import argparse, json
-ap = argparse.ArgumentParser()
-ap.add_argument('--data_dir')
-ap.parse_args()
-print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
-"""
+    source = _CHANGED_SCORING_MODEL.replace("semantic-change", "initial-candidate")
     with tempfile.TemporaryDirectory() as temp:
         trial = Path(temp)
         (trial / "model.py").write_text(source, encoding="utf-8")
@@ -909,7 +933,7 @@ print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
         assert client.calls == 2
         assert result.reflection == "The unified loop returned metrics."
         assert {item["name"] for item in agent.prompt_evidence} == {
-            "single_agent.md", "iteration.md"
+            "agent.md", "iteration.md"
         }
         row = _log_row(
             1, 0, result, "success", True, 0.6016, 0.2468,
@@ -939,12 +963,7 @@ print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
 
 def test_llm_trace_records_provider_responses_and_safe_tool_results():
     config = load_config()
-    source = """import argparse, json
-ap = argparse.ArgumentParser()
-ap.add_argument('--data_dir')
-ap.parse_args()
-print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
-"""
+    source = _CHANGED_SCORING_MODEL.replace("semantic-change", "initial-candidate")
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         trial = root / "trial"
@@ -1012,12 +1031,7 @@ class _EndEarlyThenExecuteClient(_FakeClient):
 
 def _write_fake_scoring_model(trial: Path) -> None:
     trial.joinpath("model.py").write_text(
-        """import argparse, json
-ap = argparse.ArgumentParser()
-ap.add_argument('--data_dir')
-ap.parse_args()
-print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
-""",
+        _CHANGED_SCORING_MODEL.replace("semantic-change", "initial-candidate"),
         encoding="utf-8",
     )
 
@@ -1451,11 +1465,276 @@ def test_dependency_request_rejects_urls_and_respects_user_refusal():
         assert runtime.dependency_events[2]["outcome"] == "user_declined"
 
 
+# --- trusted scoring, bounded queries, and execution budgets ---------------------
+
+def _write_validation_fixture(directory: Path, rows) -> None:
+    """Write a minimal validation log the trusted scorer can derive labels from."""
+    from mle_agent.harness.data_view import VALID_TEST_LOG
+
+    lines = ["date,user_id,video_id,long_view,tab,duration_ms,play_time_ms"]
+    for user, video, label in rows:
+        lines.append(f"20220422,{user},{video},{label},1,10000,5000")
+    (directory / VALID_TEST_LOG).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _prediction_rows(rows, scores):
+    header = "row_id,user_id,video_id,score"
+    body = [
+        f"{i},{user},{video},{score!r}"
+        for i, ((user, video, _label), score) in enumerate(zip(rows, scores))
+    ]
+    return "\n".join([header, *body]) + "\n"
+
+
+def test_trusted_scoring_rejects_validation_labels_copied_into_the_score_column():
+    from mle_agent.harness.evaluation import (
+        MAX_PLAUSIBLE_VALIDATION_GAUC,
+        score_validation_predictions,
+    )
+
+    config = load_config()
+    rows = [("u1", f"v{i}", i % 2) for i in range(20)]
+    with tempfile.TemporaryDirectory() as temp:
+        data_dir = Path(temp)
+        _write_validation_fixture(data_dir, rows)
+        leaked = data_dir / "leaked.csv"
+        leaked.write_text(
+            _prediction_rows(rows, [float(label) for _, _, label in rows]),
+            encoding="utf-8",
+        )
+        try:
+            score_validation_predictions(
+                leaked, data_dir, config.BASELINE_ROOT / "evaluate.py"
+            )
+            raise AssertionError("label-copying predictions must be rejected")
+        except ValueError as exc:
+            assert "IMPLAUSIBLE_VALIDATION_GAUC" in str(exc)
+            assert str(MAX_PLAUSIBLE_VALIDATION_GAUC) in str(exc)
+
+
+def test_trusted_scoring_accepts_an_ordinary_model_score():
+    from mle_agent.harness.evaluation import score_validation_predictions
+
+    config = load_config()
+    rows = [("u1", f"v{i}", i % 2) for i in range(20)]
+    with tempfile.TemporaryDirectory() as temp:
+        data_dir = Path(temp)
+        _write_validation_fixture(data_dir, rows)
+        honest = data_dir / "honest.csv"
+        honest.write_text(_prediction_rows(rows, [0.5] * len(rows)), encoding="utf-8")
+        scored = score_validation_predictions(
+            honest, data_dir, config.BASELINE_ROOT / "evaluate.py"
+        )
+    assert scored.rows == len(rows)
+    assert scored.metrics["GAUC"] < 0.95
+
+
+def test_root_candidate_never_imports_the_trusted_harness():
+    source = make_root_model_py(load_config())
+    assert "from mle_agent" not in source
+    assert "import mle_agent" not in source
+    assert "def write_validation_predictions" in source
+    assert "def write_hidden_submission" in source
+
+
+def _write_query_fixture(directory: Path, valid_rows) -> None:
+    from mle_agent.harness.data_view import TRAIN_LOG, VALID_TEST_LOG
+
+    header = "date,user_id,video_id,long_view,tab,duration_ms,play_time_ms,is_rand"
+    (directory / TRAIN_LOG).write_text(
+        header + "\n20220408,u1,v1,1,1,1000,500,0\n", encoding="utf-8"
+    )
+    lines = [header]
+    for user, video, label in valid_rows:
+        lines.append(f"20220422,{user},{video},{label},1,1000,500,0")
+    (directory / VALID_TEST_LOG).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_query_data_suppresses_groups_too_small_to_average_labels():
+    from mle_agent.harness.eda import MIN_GROUP_ROWS, query_aggregates
+
+    # One row per (user, video) pair: target_rate would be that row's label verbatim.
+    rows = [(f"u{i}", f"v{i}", i % 2) for i in range(30)]
+    with tempfile.TemporaryDirectory() as temp:
+        data_dir = Path(temp)
+        _write_query_fixture(data_dir, rows)
+        result = query_aggregates(data_dir, {
+            "split": "validation",
+            "group_by": ["user_id", "video_id"],
+            "metrics": ["rows", "target_rate"],
+        })
+    assert result["rows"] == []
+    assert result["suppressed_small_groups"] == len(rows)
+    assert result["suppressed_small_group_rows"] == len(rows)
+    assert str(MIN_GROUP_ROWS) in result["policy"]
+
+
+def test_query_data_returns_groups_large_enough_to_be_aggregates():
+    from mle_agent.harness.eda import MIN_GROUP_ROWS, query_aggregates
+
+    rows = [("u1", f"v{i}", i % 2) for i in range(MIN_GROUP_ROWS * 2)]
+    with tempfile.TemporaryDirectory() as temp:
+        data_dir = Path(temp)
+        _write_query_fixture(data_dir, rows)
+        result = query_aggregates(data_dir, {
+            "split": "validation",
+            "group_by": ["user_id"],
+            "metrics": ["rows", "target_rate"],
+        })
+    assert len(result["rows"]) == 1
+    assert result["rows"][0]["rows"] == MIN_GROUP_ROWS * 2
+    assert 0.0 < result["rows"][0]["target_rate"] < 1.0
+    assert result["suppressed_small_groups"] == 0
+
+
+def test_query_data_refuses_to_build_more_groups_than_the_cardinality_cap():
+    import mle_agent.harness.eda as eda_module
+
+    rows = [(f"u{i}", f"v{i}", i % 2) for i in range(10)]
+    original = eda_module.MAX_QUERY_GROUPS_SCANNED
+    eda_module.MAX_QUERY_GROUPS_SCANNED = 3
+    try:
+        with tempfile.TemporaryDirectory() as temp:
+            data_dir = Path(temp)
+            _write_query_fixture(data_dir, rows)
+            try:
+                eda_module.query_aggregates(data_dir, {
+                    "split": "validation",
+                    "group_by": ["user_id"],
+                    "metrics": ["rows"],
+                })
+                raise AssertionError("unbounded grouping must be refused")
+            except ValueError as exc:
+                assert "more than 3 groups" in str(exc)
+    finally:
+        eda_module.MAX_QUERY_GROUPS_SCANNED = original
+
+
+def _runtime_with_deadline(temp: Path, deadline):
+    trial = temp / "trial"
+    trial.mkdir()
+    trial.joinpath("model.py").write_text("pass\n", encoding="utf-8")
+    return AgentToolRuntime(trial, load_config(), BootstrapState(), run_deadline=deadline)
+
+
+def test_harness_owns_the_execution_timeout_rather_than_the_agent_request():
+    import time
+
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        # No deadline: each class maps to its own ceiling, unknown classes downgrade.
+        runtime = _runtime_with_deadline(Path(temp), None)
+        assert runtime.grant_execution_timeout("quick")["timeout_seconds"] == (
+            config.AGENT_QUICK_EXECUTION_TIMEOUT_S
+        )
+        assert runtime.grant_execution_timeout("substantial")["timeout_seconds"] == (
+            config.AGENT_SUBSTANTIAL_EXECUTION_TIMEOUT_S
+        )
+        downgraded = runtime.grant_execution_timeout("unlimited")
+        assert downgraded["granted_class"] == "normal"
+        assert downgraded["timeout_seconds"] == config.AGENT_NORMAL_EXECUTION_TIMEOUT_S
+
+
+def test_execution_timeout_is_clamped_to_the_remaining_wall_budget():
+    import time
+
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        # Far more budget than any class needs: nothing is clamped.
+        roomy = _runtime_with_deadline(Path(temp), time.time() + 100_000)
+        assert roomy.grant_execution_timeout("substantial")["granted_class"] == "substantial"
+
+    with tempfile.TemporaryDirectory() as temp:
+        # Enough for a quick run but far less than a substantial one.
+        tight_budget = config.AGENT_WALL_RESERVE_S + config.AGENT_QUICK_EXECUTION_TIMEOUT_S * 3
+        tight = _runtime_with_deadline(Path(temp), time.time() + tight_budget)
+        grant = tight.grant_execution_timeout("substantial")
+        assert grant["granted"]
+        assert grant["granted_class"] == "clamped"
+        assert grant["timeout_seconds"] < config.AGENT_SUBSTANTIAL_EXECUTION_TIMEOUT_S
+
+    with tempfile.TemporaryDirectory() as temp:
+        # Budget already spent: refuse rather than start a run that cannot finish.
+        spent = _runtime_with_deadline(Path(temp), time.time() + 1)
+        refused = spent.grant_execution_timeout("normal")
+        assert not refused["granted"]
+        assert "WALL_BUDGET_EXHAUSTED" in refused["reason"]
+
+
+def test_iteration_aborted_before_a_proposal_still_writes_a_valid_log_row():
+    """A provider outage on the first model call must not crash the run logger.
+
+    The strict schema requires non-empty hypothesis and reasoning. An aborted
+    iteration has neither, so the harness records what actually happened rather
+    than raising while writing its own log row.
+    """
+    from dataclasses import replace
+
+    from mle_agent.research_agent.adk_agent import AgentIterationResult
+
+    aborted = AgentIterationResult(
+        success=False,
+        hypothesis="",
+        reasoning="",
+        reflection="",
+        metrics=None,
+        executions=[],
+        recovery_events=[{"action": "user_declined_resume", "human_intervention": True}],
+        token_counts={"input": 31485, "output": 2046},
+        wall_seconds=10.6,
+        error="provider quota exhausted and resume declined",
+        final_code=None,
+    )
+    row = _log_row(1, 0, aborted, "failed", False, 0.6016, 0.2468, "", Path("trial_001/model.py"))
+
+    assert row["aborted_before_proposal"] is True
+    assert "provider quota exhausted" in row["reasoning"]
+    assert row["hypothesis"].strip()
+    assert validate_row(row) == []
+
+    # The model may emit one field and not the other; whatever it said is kept.
+    partial = replace(aborted, hypothesis="Add item popularity as a feature.")
+    partial_row = _log_row(
+        1, 0, partial, "failed", False, 0.6016, 0.2468, "", Path("trial_001/model.py")
+    )
+    assert partial_row["hypothesis"] == "Add item popularity as a feature."
+    assert partial_row["reasoning"].strip()
+    assert validate_row(partial_row) == []
+
+
+def test_a_real_experiment_still_requires_genuine_reasoning():
+    """The abort path must not become a way to log an experiment without reasoning."""
+    from mle_agent.research_agent.adk_agent import AgentIterationResult
+
+    ran_but_silent = AgentIterationResult(
+        success=False,
+        hypothesis="",
+        reasoning="",
+        reflection="",
+        metrics=None,
+        executions=[{"success": False, "proposal": {}}],
+        recovery_events=[],
+        token_counts={"input": 10, "output": 10},
+        wall_seconds=1.0,
+        error="candidate crashed",
+        final_code=None,
+    )
+    row = _log_row(1, 0, ran_but_silent, "failed", False, 0.6016, 0.2468, "", Path("m.py"))
+
+    assert row["aborted_before_proposal"] is False
+    assert any("reasoning must be non-empty" in error for error in validate_row(row))
+
+
 def main() -> None:
+    original_scorer = agent_tools_module.score_validation_predictions
+    agent_tools_module.score_validation_predictions = _fake_trusted_scorer
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"  PASS  {test.__name__}")
+    try:
+        for test in tests:
+            test()
+            print(f"  PASS  {test.__name__}")
+    finally:
+        agent_tools_module.score_validation_predictions = original_scorer
     print(f"\n{len(tests)} tests passed.")
 
 

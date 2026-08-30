@@ -55,6 +55,22 @@ def _log_row(
         result.executions[-1] if result.executions else {},
     )
     proposal = chosen_attempt.get("proposal", {})
+    # An iteration can end before the agent ever produces a proposal -- most often
+    # when the provider becomes unavailable on the first model call. That is an
+    # abort, not an experiment, but it still has to be logged, and the strict
+    # schema requires a non-empty hypothesis and reasoning. Say plainly what
+    # happened instead of letting the run crash on its own log row.
+    aborted_before_proposal = not result.success and not result.executions
+    reason = result.error or "the agent returned no hypothesis, reasoning, or tool call"
+    hypothesis = result.hypothesis
+    reasoning = result.reasoning
+    if aborted_before_proposal:
+        # Fill each field independently: the agent may have produced one and not the
+        # other. Anything it did say is kept verbatim.
+        if not str(hypothesis).strip():
+            hypothesis = "No hypothesis: the iteration ended before the agent proposed one."
+        if not str(reasoning).strip():
+            reasoning = f"Iteration aborted before any candidate was proposed or run: {reason}"
     recovery_outcome = "recovered" if result.success else "unresolved"
     recovery_events = [
         {**event, "outcome": event.get("outcome", recovery_outcome)}
@@ -66,8 +82,9 @@ def _log_row(
         "session_type": "agent",
         "timestamp": _now(),
         "parent_iteration": parent_iteration,
-        "hypothesis": result.hypothesis,
+        "hypothesis": hypothesis,
         "hypothesis_source": "single_agent",
+        "aborted_before_proposal": aborted_before_proposal,
         "target_component": str(proposal.get("target_component", "unclassified")),
         "feature_engineering": {
             "sources": list(proposal.get("feature_sources", [])),
@@ -98,7 +115,7 @@ def _log_row(
             1 for event in result.recovery_events
             if bool(event.get("human_intervention"))
         ),
-        "reasoning": result.reasoning,
+        "reasoning": reasoning,
         "reflection": result.reflection,
         "hypothesis_supported": getattr(result, "hypothesis_supported", None),
         "suggested_next": getattr(result, "suggested_next", ""),
@@ -163,6 +180,8 @@ def main() -> None:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     workspace = config.EXPERIMENT_WORKSPACE_DIR / run_id
     workspace.mkdir(parents=True, exist_ok=True)
+    config.RUN_RESEARCH_DIR = workspace / "research"
+    config.RUN_RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
     logger = RunLogger(config.ARTIFACTS_DIR, run_id, strict_validation=True)
     initial_environment = create_run_environment(
         config, workspace, logger.run_dir
@@ -221,6 +240,7 @@ def main() -> None:
         model=adk_settings.model,
         event_writer=logger.write_llm_event,
         provider_label=provider_label,
+        run_deadline=started + args.wall_hours * 3600,
     )
     console.harness(
         "Agent bootstrap",

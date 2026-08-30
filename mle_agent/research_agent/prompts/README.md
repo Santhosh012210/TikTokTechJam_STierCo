@@ -5,7 +5,7 @@ substitution) so JSON examples and ordinary braces need no escaping.
 
 | Template | Stage |
 |---|---|
-| `single_agent.md` | Persistent identity, scientific principles, task rails, complete MLE loop |
+| `agent.md` | Persistent identity, scientific principles, task rails, complete MLE loop |
 | `iteration.md` | Per-experiment state, bootstrap/continuation instruction, execution requirement |
 
 Templates are resolved relative to the installed `research_agent` package, never the

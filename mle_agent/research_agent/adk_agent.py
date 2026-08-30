@@ -113,8 +113,13 @@ class ResearchAgent:
         quota_input: Callable[[str], str] = input,
         quota_sleep: Callable[[float], None] = time.sleep,
         dependency_input: Callable[[str], str] = input,
+        run_deadline: float | None = None,
     ) -> None:
         self.config = config
+        # Epoch seconds at which the run's wall budget expires. The tool runtime
+        # clamps every execution timeout to what is left, so no single candidate
+        # can run past the budget.
+        self.run_deadline = run_deadline
         if config.AGENT_MAX_QUOTA_RESUMES < 0:
             raise ValueError("AGENT_MAX_QUOTA_RESUMES must be non-negative")
         if config.AGENT_MAX_QUOTA_WAIT_S <= 0:
@@ -136,7 +141,7 @@ class ResearchAgent:
         self._experiment_memory: list[dict[str, object]] = []
 
         system_prompt = render_prompt(
-            "single_agent.md",
+            "agent.md",
             starter_kit_root=config.BASELINE_ROOT,
             convergence_epsilon=f"{config.CONVERGENCE_EPSILON:.4f}",
         )
@@ -170,6 +175,11 @@ class ResearchAgent:
             tools=self._build_adk_tools(),
             generate_content_config=types.GenerateContentConfig(
                 max_output_tokens=config.AGENT_MAX_OUTPUT_TOKENS,
+                # Without an explicit budget a thinking model can spend the whole
+                # output allowance reasoning and return no text and no tool call.
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=config.AGENT_THINKING_BUDGET_TOKENS,
+                ),
             ),
             before_model_callback=self._before_model_callback,
             after_model_callback=self._after_model_callback,
@@ -256,6 +266,16 @@ class ResearchAgent:
         """Ask once; an approval applies to every later quota pause in this run."""
         if self._quota_resume_approved is not None:
             return self._quota_resume_approved
+        if self.config.AGENT_AUTO_RESUME_QUOTA:
+            # Pre-approved for unattended runs. Recovery stays bounded by
+            # AGENT_MAX_QUOTA_RESUMES and AGENT_MAX_QUOTA_WAIT_S, and every pause is
+            # still logged; this only removes the blocking prompt.
+            console.harness(
+                "Provider quota recovery pre-approved",
+                status="AGENT_AUTO_RESUME_QUOTA is set; waiting within the bounded limits",
+            )
+            self._quota_resume_approved = True
+            return True
         prompt = (
             "You have hit your LLM limit. Would you like to resume when the limit "
             "has reset? [y/n]: "
@@ -934,6 +954,7 @@ class ResearchAgent:
             self.config,
             self.bootstrap_state,
             dependency_approver=self._approve_dependency_install,
+            run_deadline=self.run_deadline,
         )
         bootstrap_prompt = render_prompt(
             "bootstrap.md", candidate_dir=candidate_dir, max_turns=max_turns
@@ -1042,6 +1063,7 @@ class ResearchAgent:
             self.config,
             self.bootstrap_state,
             dependency_approver=self._approve_dependency_install,
+            run_deadline=self.run_deadline,
         )
         iteration_prompt = render_prompt(
             "iteration.md",
@@ -1170,6 +1192,7 @@ class ResearchAgent:
             reflection = "ADK produced validation metrics but no closing reflection."
 
         recovery_events.extend(runtime.dependency_events)
+        recovery_events.extend(runtime.data_query_events)
         if best_execution is not None:
             for index, execution in enumerate(runtime.executions):
                 if execution.get("success"):

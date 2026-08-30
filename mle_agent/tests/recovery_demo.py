@@ -23,13 +23,20 @@ _SYNTAX_FAILURE = "def broken(:\n    pass\n"
 _RUNTIME_FAILURE = """import argparse
 ap = argparse.ArgumentParser()
 ap.add_argument('--data_dir')
+ap.add_argument('--seed')
+ap.add_argument('--prediction-path')
+ap.add_argument('--trial-config')
 ap.parse_args()
 raise RuntimeError('deliberate recovery demonstration')
 """
 _RECOVERED_MODEL = """import argparse, json
 ap = argparse.ArgumentParser()
 ap.add_argument('--data_dir')
-ap.parse_args()
+ap.add_argument('--seed')
+ap.add_argument('--prediction-path')
+ap.add_argument('--trial-config')
+a = ap.parse_args()
+open(a.prediction_path, 'w').write('row_id,user_id,video_id,score\\n')
 print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
 """
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -14,16 +15,37 @@ from google.genai import types
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from mle_agent.harness.adk_config import configure_google_adk_environment
+import mle_agent.harness.agent_tools as agent_tools_module
 from mle_agent.harness.agent_tools import BootstrapState
 from mle_agent.harness.config import Config
+from mle_agent.harness.evaluation import ScoredPredictions
 from mle_agent.research_agent.adk_agent import ResearchAgent
 from mle_agent.tests.recovery_demo import run_recovery_scenario
+
+
+def _fake_trusted_scorer(path, *_args, **_kwargs):
+    source = (Path(path).parent.parent / "model.py").read_text(encoding="utf-8")
+    def metric(name: str, fallback: float) -> float:
+        match = re.search(rf"['\"]{re.escape(name)}['\"]\s*:\s*([0-9.]+)", source)
+        return float(match.group(1)) if match else fallback
+    return ScoredPredictions(
+        metrics={
+            "GAUC": metric("GAUC", 0.61),
+            "nDCG@5": metric("nDCG@5", 0.60),
+            "primary": metric("primary", 0.605),
+        },
+        rows=1,
+    )
 
 
 _CHANGED_MODEL = """import argparse, json
 ap = argparse.ArgumentParser()
 ap.add_argument('--data_dir')
-ap.parse_args()
+ap.add_argument('--seed')
+ap.add_argument('--prediction-path')
+ap.add_argument('--trial-config')
+a = ap.parse_args()
+open(a.prediction_path, 'w').write('row_id,user_id,video_id,score\\n')
 print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
 """
 
@@ -482,10 +504,15 @@ def test_adk_configuration_prefers_native_names_and_keeps_gemini_compatibility()
 
 
 def main() -> None:
+    original_scorer = agent_tools_module.score_validation_predictions
+    agent_tools_module.score_validation_predictions = _fake_trusted_scorer
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
-    for test in tests:
-        test()
-        print(f"  PASS  {test.__name__}")
+    try:
+        for test in tests:
+            test()
+            print(f"  PASS  {test.__name__}")
+    finally:
+        agent_tools_module.score_validation_predictions = original_scorer
     print(f"\n{len(tests)} Google ADK tests passed.")
 
 

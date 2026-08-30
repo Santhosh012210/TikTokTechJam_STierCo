@@ -117,10 +117,10 @@ def finalize_run(
             "GEMINI_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY",
         }
     }
-    env["PYTHONPATH"] = os.pathsep.join((
-        str(Config.BASELINE_ROOT),
-        str(project_root),
-    ))
+    # Same import boundary as research execution: only the organiser starter kit.
+    # Candidates inline their own prediction and submission writers, so nothing
+    # here needs the trusted harness on the path.
+    env["PYTHONPATH"] = str(Config.BASELINE_ROOT)
 
     final_dir = artifacts_root / "final"
     final_dir.mkdir(parents=True, exist_ok=True)

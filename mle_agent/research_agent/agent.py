@@ -103,7 +103,7 @@ class ResearchAgent:
             if rate_limit_retry_delay_s is None else rate_limit_retry_delay_s
         )
         system_prompt = render_prompt(
-            "single_agent.md",
+            "agent.md",
             starter_kit_root=config.BASELINE_ROOT,
             convergence_epsilon=f"{config.CONVERGENCE_EPSILON:.4f}",
         )

@@ -73,18 +73,46 @@ chain-of-thought or a long explanation.
 - Every research experiment must make a substantive Python change to the inherited
   `model.py` before `run_model`. The runtime rejects unchanged, comment-only, and
   formatting-only candidates; baseline reproduction is handled separately by trial 000.
-- Every candidate must preserve the inherited JSON metric-output contract expected by the
-  harness.
+- Every candidate must preserve the inherited prediction contract described below. You do
+  not compute or report your own score; the harness does.
 - Do not repeat measured dead ends recorded in the retained task context.
 - Prefer evidence-backed pipeline changes over arbitrary hyperparameter sweeps.
 
 # Candidate contract
 
-Preserve the inherited model contract: accept `--data_dir` and optional `--submission-path`,
-train from the train split, score only the validation split during research, use fixed randomness,
-and convert NumPy scalar metrics to ordinary Python values before `json.dumps`. Preserve the
-trusted `write_hidden_submission` call for finalization; never call it during research because the
-harness does not pass `--submission-path` and the research data view contains no hidden rows.
+Your `model.py` emits predictions; the harness scores them. You never report your own metrics,
+and printed metric JSON is ignored.
+
+Accept exactly these arguments, all of which the inherited `model.py` already parses:
+
+    model.py --data_dir D --seed S --prediction-path P [--trial-config C]
+    model.py --data_dir D --seed S --submission-path P
+
+- `--prediction-path` is what research runs use. Write one finite score per validation row via
+  the inherited `write_validation_predictions` helper, in `data.load()` order. Its header is
+  `row_id,user_id,video_id,score` with `row_id` a 0-based increasing index. The harness re-derives
+  the labels itself, checks every row for alignment, and scores the file with the unchanged
+  organiser evaluator. A run that exits 0 without writing this file is a failed experiment.
+- `--seed` must drive every source of randomness, so the same seed reproduces the same file.
+- `--trial-config` is an optional JSON file of hyperparameters — data, never code. Declare the
+  keys you accept and raise on unknown keys, as the inherited model does. This is how you test
+  several configurations of one idea without rewriting the file each time.
+- `--submission-path` belongs to finalization only. Keep the `write_hidden_submission` function
+  and its call, but never trigger it during research: the harness does not pass the flag and the
+  research data view contains no hidden rows.
+
+Both helpers are defined inside `model.py` itself and depend only on the standard library. Keep
+them there. Candidate code cannot import anything from `mle_agent`; only the organiser starter kit
+(`data`, `evaluate`) is on the import path.
+
+You may use the validation labels for early stopping, exactly as the organiser baseline does. You
+may not let them reach the score column, directly or through a feature fitted on them. The harness
+rejects any candidate whose validation GAUC exceeds a plausibility ceiling, because that indicates
+leakage rather than a model that generalizes.
+
+Request execution time with `execution_class` on `run_model`: `quick` for a diagnostic, `normal`
+for an ordinary candidate, `substantial` for a framework-backed run that genuinely needs longer.
+You propose; the harness decides the actual limit and may clamp it to the remaining wall budget.
 
 # Complete loop
 
