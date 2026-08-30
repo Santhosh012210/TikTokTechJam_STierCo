@@ -26,8 +26,17 @@ artifacts/
 - `final/` contains only the explicitly selected submission and its evidence.
 
 The agent writes temporary trial implementations to the Git-ignored
-`experiment_workspace/`. When a trial is selected for submission, copy its runnable
-model into `artifacts/final/` so the final implementation is preserved in Git.
+`experiment_workspace/`. Promote the validation-best candidate with the trusted
+finalizer instead of copying a peak trial by hand:
+
+```bash
+./mle_agent/scripts/finalize.sh --run-id <run_id> --task-definition-confirmed
+```
+
+It accepts a converged run (or an explicitly acknowledged official hard-budget stop),
+copies the selected model, generates the aligned prediction CSV, runs the organiser's
+format/alignment check, and writes the final metrics and report. It does not score the
+hidden split.
 
 Commit official run artifacts used to support reported results. Do not promote secrets,
 raw datasets, or disposable development runs.

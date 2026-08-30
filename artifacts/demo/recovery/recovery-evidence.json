@@ -1,0 +1,489 @@
+{
+  "scenario": "automatic_syntax_and_runtime_recovery",
+  "success": true,
+  "manual_interventions": 0,
+  "model_calls": 7,
+  "failed_execution_attempts": 2,
+  "successful_execution_attempts": 1,
+  "validation_errors": [],
+  "event": {
+    "schema_version": 2,
+    "iteration": 1,
+    "session_type": "agent",
+    "timestamp": "2026-08-30T07:36:22.186241Z",
+    "parent_iteration": 0,
+    "hypothesis": "Demonstrate bounded automatic candidate recovery",
+    "hypothesis_source": "single_agent",
+    "target_component": "agent_selected",
+    "code_path": "<DEMO_WORKSPACE>/experiment_workspace/recovery_demo/trial_001/model.py",
+    "code_diff": "--- trial_000/model.py\n+++ trial_001/model.py\n@@ -1 +1,5 @@\n-print('inherited candidate')\n+import argparse, json\n+ap = argparse.ArgumentParser()\n+ap.add_argument('--data_dir')\n+ap.parse_args()\n+print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))",
+    "code_diff_reason": null,
+    "status": "success",
+    "internal_repairs": 2,
+    "metrics": {
+      "GAUC": 0.61,
+      "nDCG@5": 0.6,
+      "primary": 0.605
+    },
+    "delta_vs_baseline": 0.0033999999999999586,
+    "pct_of_headroom": 1.3776337115072768,
+    "is_new_best": true,
+    "error": null,
+    "tokens": {
+      "input": 56,
+      "output": 28
+    },
+    "wall_seconds": 0.7839617729187012,
+    "human_intervention": false,
+    "reasoning": "Verify that the repaired candidate completes and scores.",
+    "reflection": "The syntax gate prevented invalid execution, the runtime traceback guided a targeted repair, and the final candidate scored successfully.",
+    "hypothesis_supported": true,
+    "suggested_next": "Apply the same bounded repair protocol to real experiments.",
+    "execution_attempts": [
+      {
+        "hypothesis": "Demonstrate bounded automatic candidate recovery",
+        "reasoning": "First verify that the syntax gate blocks invalid Python.",
+        "literature_chunk_ids": [],
+        "proposal": {
+          "target_component": "agent_selected",
+          "expected_effect": "",
+          "falsification_criterion": "",
+          "rollback_plan": "retain incumbent"
+        },
+        "success": false,
+        "metrics": null,
+        "error": "SKIPPED: model.py failed its PostFileSave check. Fix and save model.py successfully before calling run_model again.",
+        "wall_seconds": 0.0,
+        "candidate_changed": true,
+        "skipped": true
+      },
+      {
+        "hypothesis": "Demonstrate bounded automatic candidate recovery",
+        "reasoning": "Run the syntax-valid candidate and inspect its traceback.",
+        "literature_chunk_ids": [],
+        "proposal": {
+          "target_component": "agent_selected",
+          "expected_effect": "",
+          "falsification_criterion": "",
+          "rollback_plan": "retain incumbent"
+        },
+        "success": false,
+        "metrics": null,
+        "error": "model.py exited 1\nTraceback (most recent call last):\n  File \"<DEMO_WORKSPACE>/experiment_workspace/recovery_demo/trial_001/model.py\", line 5, in <module>\n    raise RuntimeError('deliberate recovery demonstration')\nRuntimeError: deliberate recovery demonstration\n",
+        "wall_seconds": 0.0216367244720459,
+        "candidate_changed": true
+      },
+      {
+        "hypothesis": "Demonstrate bounded automatic candidate recovery",
+        "reasoning": "Verify that the repaired candidate completes and scores.",
+        "literature_chunk_ids": [],
+        "proposal": {
+          "target_component": "agent_selected",
+          "expected_effect": "",
+          "falsification_criterion": "",
+          "rollback_plan": "retain incumbent"
+        },
+        "success": true,
+        "metrics": {
+          "GAUC": 0.61,
+          "nDCG@5": 0.6,
+          "primary": 0.605
+        },
+        "error": null,
+        "wall_seconds": 0.018623828887939453,
+        "candidate_changed": true
+      }
+    ],
+    "recovery_events": [
+      {
+        "type": "model_execution_recovery",
+        "phase": "experiment_1",
+        "failed_attempt": 1,
+        "error": "SKIPPED: model.py failed its PostFileSave check. Fix and save model.py successfully before calling run_model again.",
+        "action": "repair_candidate_and_rerun",
+        "outcome": "recovered"
+      },
+      {
+        "type": "model_execution_recovery",
+        "phase": "experiment_1",
+        "failed_attempt": 2,
+        "error": "model.py exited 1\nTraceback (most recent call last):\n  File \"<DEMO_WORKSPACE>/experiment_workspace/recovery_demo/trial_001/model.py\", line 5, in <module>\n    raise RuntimeError('deliberate recovery demonstration')\nRuntimeError: deliberate recovery demonstration\n",
+        "action": "repair_candidate_and_rerun",
+        "outcome": "recovered"
+      }
+    ]
+  },
+  "llm_trace": [
+    {
+      "event_type": "llm_response",
+      "timestamp": "2026-08-30T07:36:22.067339Z",
+      "llm_response_id": "llm_000001",
+      "llm_response_number": 1,
+      "provider_call_attempt": 1,
+      "retry_attempt": 1,
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_1",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "adk_invocation_model_call": 1,
+      "latency_seconds": 0.0009090900421142578,
+      "messages_before_call": 1,
+      "stop_reason": "tool_use",
+      "finish_reason": "STOP",
+      "input_tokens": 8,
+      "output_tokens": 4,
+      "decision_summary": "Testing a deliberately malformed candidate.",
+      "response_text": "Testing a deliberately malformed candidate.",
+      "response_text_chars": 43,
+      "response_text_sha256": "0839979ee094394dbba65df5c4f3126d7876df31b7784909d0107737034a5009",
+      "tool_calls": [
+        {
+          "tool_call_id": "",
+          "name": "write_file",
+          "summary": "write_file(path=model.py, chars=22)",
+          "input": {
+            "path": "model.py",
+            "content_chars": 22,
+            "content_sha256": "6b8c8a725c23dc076d9a2c185ce4e02435746bc3b4f99906d13de360e56898c7"
+          }
+        }
+      ]
+    },
+    {
+      "event_type": "tool_result",
+      "timestamp": "2026-08-30T07:36:22.089964Z",
+      "llm_response_id": "llm_000001",
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_1",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "tool_call": {
+        "tool_call_id": "adk-b39b8a3b-9297-425c-a654-6964f45a9c41",
+        "name": "write_file",
+        "summary": "write_file(path=model.py, chars=22)",
+        "input": {
+          "path": "model.py",
+          "content_chars": 22,
+          "content_sha256": "6b8c8a725c23dc076d9a2c185ce4e02435746bc3b4f99906d13de360e56898c7"
+        }
+      },
+      "success": false,
+      "output_summary": "{ \"success\": false, \"output\": \"FAILED: wrote 22 bytes to model.py, but a PostFileSave hook failed:\\nPostFileSave model-py-compile: File \\\"/private<DEMO_WORKSPACE>/experiment_workspace/recovery_demo/trial_001/model.py\\\", line 1\\n def broken(:\\n ^\\nSyntaxError: invalid syntax\" }",
+      "output_chars": 342,
+      "output_sha256": "6934467ee311c2f89b9088f9238841045bcd0ddc22ee196a08eec56159fae069",
+      "output_preview": "{\n  \"success\": false,\n  \"output\": \"FAILED: wrote 22 bytes to model.py, but a PostFileSave hook failed:\\nPostFileSave model-py-compile: File \\\"/private<DEMO_WORKSPACE>/experiment_workspace/recovery_demo/trial_001/model.py\\\", line 1\\n    def broken(:\\n               ^\\nSyntaxError: invalid syntax\"\n}",
+      "output_truncated": false
+    },
+    {
+      "event_type": "llm_response",
+      "timestamp": "2026-08-30T07:36:22.092530Z",
+      "llm_response_id": "llm_000002",
+      "llm_response_number": 2,
+      "provider_call_attempt": 2,
+      "retry_attempt": 1,
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_2",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "adk_invocation_model_call": 2,
+      "latency_seconds": 0.00015282630920410156,
+      "messages_before_call": 3,
+      "stop_reason": "tool_use",
+      "finish_reason": "STOP",
+      "input_tokens": 8,
+      "output_tokens": 4,
+      "decision_summary": "Calling local tool: run_model.",
+      "response_text": "",
+      "response_text_chars": 0,
+      "response_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tool_calls": [
+        {
+          "tool_call_id": "",
+          "name": "run_model",
+          "summary": "run_model(hypothesis='Demonstrate bounded automatic candidate recovery'; rationale='First verify that the syntax gate blocks invalid Python.')",
+          "input": {
+            "hypothesis": "Demonstrate bounded automatic candidate recovery",
+            "reasoning": "First verify that the syntax gate blocks invalid Python.",
+            "literature_chunk_ids": []
+          }
+        }
+      ]
+    },
+    {
+      "event_type": "tool_result",
+      "timestamp": "2026-08-30T07:36:22.093012Z",
+      "llm_response_id": "llm_000002",
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_2",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "tool_call": {
+        "tool_call_id": "adk-1da4728c-10a0-4cb3-9e49-bd806eec9c1c",
+        "name": "run_model",
+        "summary": "run_model(hypothesis='Demonstrate bounded automatic candidate recovery'; rationale='First verify that the syntax gate blocks invalid Python.')",
+        "input": {
+          "hypothesis": "Demonstrate bounded automatic candidate recovery",
+          "reasoning": "First verify that the syntax gate blocks invalid Python.",
+          "literature_chunk_ids": []
+        }
+      },
+      "success": false,
+      "output_summary": "SKIPPED: model.py failed its PostFileSave check. Fix and save model.py successfully before calling run_model again.",
+      "output_chars": 580,
+      "output_sha256": "03d2ceea226d83706d6b3152b36cae376c0ff3fa98789d7fce1bbdaf97396afc",
+      "output_preview": "{\n  \"hypothesis\": \"Demonstrate bounded automatic candidate recovery\",\n  \"reasoning\": \"First verify that the syntax gate blocks invalid Python.\",\n  \"literature_chunk_ids\": [],\n  \"proposal\": {\n    \"target_component\": \"agent_selected\",\n    \"expected_effect\": \"\",\n    \"falsification_criterion\": \"\",\n    \"rollback_plan\": \"retain incumbent\"\n  },\n  \"success\": false,\n  \"metrics\": null,\n  \"error\": \"SKIPPED: model.py failed its PostFileSave check. Fix and save model.py successfully before calling run_model again.\",\n  \"wall_seconds\": 0.0,\n  \"candidate_changed\": true,\n  \"skipped\": true\n}",
+      "output_truncated": false
+    },
+    {
+      "event_type": "llm_response",
+      "timestamp": "2026-08-30T07:36:22.093796Z",
+      "llm_response_id": "llm_000003",
+      "llm_response_number": 3,
+      "provider_call_attempt": 3,
+      "retry_attempt": 1,
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_3",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "adk_invocation_model_call": 3,
+      "latency_seconds": 0.00011515617370605469,
+      "messages_before_call": 5,
+      "stop_reason": "tool_use",
+      "finish_reason": "STOP",
+      "input_tokens": 8,
+      "output_tokens": 4,
+      "decision_summary": "Repairing syntax, then exposing a runtime failure.",
+      "response_text": "Repairing syntax, then exposing a runtime failure.",
+      "response_text_chars": 50,
+      "response_text_sha256": "d98c33c0a517e5af3ae6955e91ebe78e7eaccf4060359a4deccfbd2ed204afc2",
+      "tool_calls": [
+        {
+          "tool_call_id": "",
+          "name": "write_file",
+          "summary": "write_file(path=model.py, chars=149)",
+          "input": {
+            "path": "model.py",
+            "content_chars": 149,
+            "content_sha256": "ab5076adf54a0c019e406feede92f16917a4d6adddbe60ce6a97313e5ca29481"
+          }
+        }
+      ]
+    },
+    {
+      "event_type": "tool_result",
+      "timestamp": "2026-08-30T07:36:22.114484Z",
+      "llm_response_id": "llm_000003",
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_3",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "tool_call": {
+        "tool_call_id": "adk-b407834b-b054-4a48-b227-3e5b6c23974f",
+        "name": "write_file",
+        "summary": "write_file(path=model.py, chars=149)",
+        "input": {
+          "path": "model.py",
+          "content_chars": 149,
+          "content_sha256": "ab5076adf54a0c019e406feede92f16917a4d6adddbe60ce6a97313e5ca29481"
+        }
+      },
+      "success": true,
+      "output_summary": "{ \"success\": true, \"output\": \"OK: wrote 149 bytes to model.py\" }",
+      "output_chars": 68,
+      "output_sha256": "64af44ef80f38948fbcc0e36e9aa2196afb334b0f6b2907000a239cebf7c060e",
+      "output_preview": "{\n  \"success\": true,\n  \"output\": \"OK: wrote 149 bytes to model.py\"\n}",
+      "output_truncated": false
+    },
+    {
+      "event_type": "llm_response",
+      "timestamp": "2026-08-30T07:36:22.116968Z",
+      "llm_response_id": "llm_000004",
+      "llm_response_number": 4,
+      "provider_call_attempt": 4,
+      "retry_attempt": 1,
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_4",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "adk_invocation_model_call": 4,
+      "latency_seconds": 0.0004439353942871094,
+      "messages_before_call": 7,
+      "stop_reason": "tool_use",
+      "finish_reason": "STOP",
+      "input_tokens": 8,
+      "output_tokens": 4,
+      "decision_summary": "Calling local tool: run_model.",
+      "response_text": "",
+      "response_text_chars": 0,
+      "response_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tool_calls": [
+        {
+          "tool_call_id": "",
+          "name": "run_model",
+          "summary": "run_model(hypothesis='Demonstrate bounded automatic candidate recovery'; rationale='Run the syntax-valid candidate and inspect its traceback.')",
+          "input": {
+            "hypothesis": "Demonstrate bounded automatic candidate recovery",
+            "reasoning": "Run the syntax-valid candidate and inspect its traceback.",
+            "literature_chunk_ids": []
+          }
+        }
+      ]
+    },
+    {
+      "event_type": "tool_result",
+      "timestamp": "2026-08-30T07:36:22.139303Z",
+      "llm_response_id": "llm_000004",
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_4",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "tool_call": {
+        "tool_call_id": "adk-9b0e23dc-c6a0-4ba0-98ea-ffd0a5172b29",
+        "name": "run_model",
+        "summary": "run_model(hypothesis='Demonstrate bounded automatic candidate recovery'; rationale='Run the syntax-valid candidate and inspect its traceback.')",
+        "input": {
+          "hypothesis": "Demonstrate bounded automatic candidate recovery",
+          "reasoning": "Run the syntax-valid candidate and inspect its traceback.",
+          "literature_chunk_ids": []
+        }
+      },
+      "success": false,
+      "output_summary": "model.py exited 1\nTraceback (most recent call last):\n  File \"<DEMO_WORKSPACE>/experiment_workspace/recovery_demo/trial_001/model.py\", line 5, in <module>\n    raise RuntimeError('deliberate recovery demonstration')\nRuntimeError: deliberate recovery demonstration\n",
+      "output_chars": 775,
+      "output_sha256": "dfe9b7d38e2919dd109f6de1c31a382f78c42d64f7dda627f74387a7af6ffc24",
+      "output_preview": "{\n  \"hypothesis\": \"Demonstrate bounded automatic candidate recovery\",\n  \"reasoning\": \"Run the syntax-valid candidate and inspect its traceback.\",\n  \"literature_chunk_ids\": [],\n  \"proposal\": {\n    \"target_component\": \"agent_selected\",\n    \"expected_effect\": \"\",\n    \"falsification_criterion\": \"\",\n    \"rollback_plan\": \"retain incumbent\"\n  },\n  \"success\": false,\n  \"metrics\": null,\n  \"error\": \"model.py exited 1\\nTraceback (most recent call last):\\n  File \\\"<DEMO_WORKSPACE>/experiment_workspace/recovery_demo/trial_001/model.py\\\", line 5, in <module>\\n    raise RuntimeError('deliberate recovery demonstration')\\nRuntimeError: deliberate recovery demonstration\\n\",\n  \"wall_seconds\": 0.0216367244720459,\n  \"candidate_changed\": true\n}",
+      "output_truncated": false
+    },
+    {
+      "event_type": "llm_response",
+      "timestamp": "2026-08-30T07:36:22.141199Z",
+      "llm_response_id": "llm_000005",
+      "llm_response_number": 5,
+      "provider_call_attempt": 5,
+      "retry_attempt": 1,
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_5",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "adk_invocation_model_call": 5,
+      "latency_seconds": 0.00016307830810546875,
+      "messages_before_call": 9,
+      "stop_reason": "tool_use",
+      "finish_reason": "STOP",
+      "input_tokens": 8,
+      "output_tokens": 4,
+      "decision_summary": "Applying the smallest runtime repair.",
+      "response_text": "Applying the smallest runtime repair.",
+      "response_text_chars": 37,
+      "response_text_sha256": "419028c58d479863318564162bf58312230b220ff84e6be219adc2c48c7918d3",
+      "tool_calls": [
+        {
+          "tool_call_id": "",
+          "name": "write_file",
+          "summary": "write_file(path=model.py, chars=167)",
+          "input": {
+            "path": "model.py",
+            "content_chars": 167,
+            "content_sha256": "dd61b28aabd642303740f69478f232599e1e3be912dac6988b55d1a14fcec919"
+          }
+        }
+      ]
+    },
+    {
+      "event_type": "tool_result",
+      "timestamp": "2026-08-30T07:36:22.162215Z",
+      "llm_response_id": "llm_000005",
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_5",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "tool_call": {
+        "tool_call_id": "adk-f4bf1cb0-4252-457c-9b34-9fc7a1357b06",
+        "name": "write_file",
+        "summary": "write_file(path=model.py, chars=167)",
+        "input": {
+          "path": "model.py",
+          "content_chars": 167,
+          "content_sha256": "dd61b28aabd642303740f69478f232599e1e3be912dac6988b55d1a14fcec919"
+        }
+      },
+      "success": true,
+      "output_summary": "{ \"success\": true, \"output\": \"OK: wrote 167 bytes to model.py\" }",
+      "output_chars": 68,
+      "output_sha256": "d1fa97ffdc7dde9f75bd9f827f17e293721e5870ab95a4a2cc65679b658834c8",
+      "output_preview": "{\n  \"success\": true,\n  \"output\": \"OK: wrote 167 bytes to model.py\"\n}",
+      "output_truncated": false
+    },
+    {
+      "event_type": "llm_response",
+      "timestamp": "2026-08-30T07:36:22.164320Z",
+      "llm_response_id": "llm_000006",
+      "llm_response_number": 6,
+      "provider_call_attempt": 6,
+      "retry_attempt": 1,
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_6",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "adk_invocation_model_call": 6,
+      "latency_seconds": 0.00016689300537109375,
+      "messages_before_call": 11,
+      "stop_reason": "tool_use",
+      "finish_reason": "STOP",
+      "input_tokens": 8,
+      "output_tokens": 4,
+      "decision_summary": "Calling local tool: run_model.",
+      "response_text": "",
+      "response_text_chars": 0,
+      "response_text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tool_calls": [
+        {
+          "tool_call_id": "",
+          "name": "run_model",
+          "summary": "run_model(hypothesis='Demonstrate bounded automatic candidate recovery'; rationale='Verify that the repaired candidate completes and scores.')",
+          "input": {
+            "hypothesis": "Demonstrate bounded automatic candidate recovery",
+            "reasoning": "Verify that the repaired candidate completes and scores.",
+            "literature_chunk_ids": []
+          }
+        }
+      ]
+    },
+    {
+      "event_type": "tool_result",
+      "timestamp": "2026-08-30T07:36:22.183666Z",
+      "llm_response_id": "llm_000006",
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_6",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "tool_call": {
+        "tool_call_id": "adk-abf658e7-1e41-4a13-81fd-185e45134caf",
+        "name": "run_model",
+        "summary": "run_model(hypothesis='Demonstrate bounded automatic candidate recovery'; rationale='Verify that the repaired candidate completes and scores.')",
+        "input": {
+          "hypothesis": "Demonstrate bounded automatic candidate recovery",
+          "reasoning": "Verify that the repaired candidate completes and scores.",
+          "literature_chunk_ids": []
+        }
+      },
+      "success": true,
+      "output_summary": "GAUC=0.610000; nDCG@5=0.600000; primary=0.605000; wall=0.02s.",
+      "output_chars": 523,
+      "output_sha256": "edb7fae4a0d9405c3e46038d51584f0556af3bc7d92a5e3dc6d4bad727c46fad",
+      "output_preview": "{\n  \"hypothesis\": \"Demonstrate bounded automatic candidate recovery\",\n  \"reasoning\": \"Verify that the repaired candidate completes and scores.\",\n  \"literature_chunk_ids\": [],\n  \"proposal\": {\n    \"target_component\": \"agent_selected\",\n    \"expected_effect\": \"\",\n    \"falsification_criterion\": \"\",\n    \"rollback_plan\": \"retain incumbent\"\n  },\n  \"success\": true,\n  \"metrics\": {\n    \"GAUC\": 0.61,\n    \"nDCG@5\": 0.6,\n    \"primary\": 0.605\n  },\n  \"error\": null,\n  \"wall_seconds\": 0.018623828887939453,\n  \"candidate_changed\": true\n}",
+      "output_truncated": false
+    },
+    {
+      "event_type": "llm_response",
+      "timestamp": "2026-08-30T07:36:22.185590Z",
+      "llm_response_id": "llm_000007",
+      "llm_response_number": 7,
+      "provider_call_attempt": 7,
+      "retry_attempt": 1,
+      "provider": "google-adk / fake-recovery-adk",
+      "phase": "experiment_1_turn_7",
+      "adk_invocation_id": "e-aac8b38e-7070-471b-872e-812129780e93",
+      "adk_invocation_model_call": 7,
+      "latency_seconds": 0.00016808509826660156,
+      "messages_before_call": 13,
+      "stop_reason": "end_turn",
+      "finish_reason": "STOP",
+      "input_tokens": 8,
+      "output_tokens": 4,
+      "decision_summary": "The syntax gate prevented invalid execution, the runtime traceback guided a targeted repair, and the final candidate scored successfully.",
+      "response_text": "{\"reflection\": \"The syntax gate prevented invalid execution, the runtime traceback guided a targeted repair, and the final candidate scored successfully.\", \"hypothesis_supported\": true, \"suggested_next\": \"Apply the same bounded repair protocol to real experiments.\"}",
+      "response_text_chars": 266,
+      "response_text_sha256": "9f9f67873da9f32235f3b2be9ad506f7a5f308ff22d106157d4a93031507ff1d",
+      "tool_calls": []
+    }
+  ]
+}

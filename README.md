@@ -8,8 +8,9 @@ the benchmark, inspect train/validation data, research and propose a hypothesis,
 implement a self-contained candidate model, train and score it, repair failures, and
 reflect before the next experiment — until it converges or runs out of budget.
 
-The code splits along one line: `research_agent/` decides what to investigate and try
-next; `harness/` executes those decisions deterministically and records the evidence.
+All agent code is grouped under the local `mle_agent/` namespace; no installation is
+required. `mle_agent/research_agent/` decides what to investigate and try next, while
+`mle_agent/harness/` executes those decisions deterministically and records the evidence.
 
 ---
 
@@ -33,9 +34,11 @@ Full conventions live in `baseline_kuairand-starter-kit/evaluate.py` and its REA
 ## Repository layout
 
 ```
-research_agent/                    agent reasoning — builder, strategist, tree search, method corpus
-harness/                           deterministic runtime — orchestration, provider, tools, logging
-tests/                             offline tests + the live builder smoke check
+mle_agent/
+  research_agent/                  persistent reasoning, prompts, and method corpus
+  harness/                         deterministic runtime, safety, convergence, evidence
+  tests/                           offline, ADK, and recovery tests
+  scripts/                         run, verify, recovery-demo, and finalization commands
 baseline_kuairand-starter-kit/     organiser starter kit — read-only reference
 datasets/                          dataset instructions; downloaded data is gitignored
 experiment_workspace/              generated trial code; local and gitignored
@@ -58,16 +61,14 @@ log are not exposed to candidate processes.
 
 | Module | Role |
 |---|---|
-| `harness/agent_main.py` | Single-agent run entrypoint — deterministic baseline, budgets, convergence, evidence |
-| `research_agent/adk_agent.py` | Google ADK agent, persistent session, callbacks, event tracing, and tool adapters |
-| `harness/agent_tools.py` | Constrained agent tools — train/valid EDA, literature search, file editing, model execution |
-| `harness/hooks.py` | Provider-independent lifecycle hooks; `model.py` saves get an immediate syntax check and failed saves gate execution |
-| `harness/main.py` + Builder/Strategist | Previous multi-session architecture retained temporarily for comparison |
-| `research_agent/knowledge/` | Local method corpus + offline BM25 `search_ml_literature` tool |
-| `harness/adk_config.py` | Native Gemini/Google ADK configuration with legacy Gemini-env compatibility |
-| `harness/provider.py` | Provider abstraction retained only for the legacy comparison runner |
-| `harness/logger.py` + `harness/validator.py` | Structured JSONL logging and schema validation |
-| `harness/config.py` | Single source of runtime constants and paths |
+| `mle_agent/harness/agent_main.py` | Single-agent run entrypoint — baseline, budgets, convergence, selection, evidence |
+| `mle_agent/research_agent/adk_agent.py` | Persistent Google ADK session, recovery loop, compact experiment memory |
+| `mle_agent/harness/agent_tools.py` | Constrained tools — train/valid EDA, literature, file editing, model execution |
+| `mle_agent/harness/hooks.py` | Immediate syntax check; failed saves gate execution until repaired |
+| `mle_agent/harness/main.py` + Builder/Strategist | Legacy comparison path; not used for the submission run |
+| `mle_agent/research_agent/knowledge/` | Offline BM25 method corpus |
+| `mle_agent/harness/logger.py` + `validator.py` | Strict v2 experiment evidence and validation |
+| `mle_agent/harness/finalize.py` | Trusted final promotion and submission-alignment check |
 
 Convergence rule (from the starter kit's 5-seed variance): ε = 0.002, N = 3 — three
 consecutive iterations with ≤0.002 validation gain means stop.
@@ -90,22 +91,27 @@ curl -L https://zenodo.org/records/10439422/files/KuaiRand-Pure.tar.gz \
   -o datasets/KuaiRand-Pure.tar.gz
 tar -xzf datasets/KuaiRand-Pure.tar.gz -C datasets
 
-# offline checks — no API key, no dataset
-python tests/test_knowledge.py
-python tests/test_adk_agent.py
+# offline checks + Starter Kit integrity — no API key, no dataset
+./mle_agent/scripts/test_offline.sh
+
+# deterministic syntax/runtime recovery demonstration
+./mle_agent/scripts/demo_recovery.sh
 
 # verify the baseline reproduces (needs the dataset, ~40s)
 python baseline_kuairand-starter-kit/baseline.py \
   --model fm --data_dir datasets/KuaiRand-Pure/data
 
 # single-agent dev run (3 experiments, up to 30 min)
-./scripts/run_agent.sh
+./mle_agent/scripts/run_agent.sh
 
 # one-experiment smoke run (unlimited ADK calls, up to 30 min)
-./scripts/run_agent_once.sh
+./mle_agent/scripts/run_agent_once.sh
 
 # optionally impose explicit call caps when diagnosing a runaway prompt/tool loop
-AGENT_MAX_ITER=5 AGENT_MAX_TURNS=20 AGENT_BOOTSTRAP_MAX_TURNS=20 ./scripts/run_agent.sh
+AGENT_MAX_ITER=5 AGENT_MAX_TURNS=20 AGENT_BOOTSTRAP_MAX_TURNS=20 ./mle_agent/scripts/run_agent.sh
+
+# official-budget run after smoke verification and metric confirmation
+TASK_DEFINITION_CONFIRMED=1 ./mle_agent/scripts/run_official.sh
 ```
 
 Before experiment 1, the ADK agent completes a separate uncapped bootstrap phase. It discovers the
@@ -133,7 +139,7 @@ human confirmation.
 ## Where the headroom is
 
 The agent is not handed a ranked list of things to try — that would make the harness the
-researcher and the agent the typist. Instead `research_agent/knowledge/` ships a corpus of
+researcher and the agent the typist. Instead `mle_agent/research_agent/knowledge/` ships a corpus of
 19 established methods (ranking losses, sequence models, multi-task architectures,
 watch-time and debiasing methods, GBDT ranking), each covering what it is, why it helps a
 ranking metric, how to implement it, and **when it will not help**. The persistent single
@@ -141,10 +147,35 @@ agent searches this catalogue, cites retrieved chunks in its experiment reasonin
 keeps that evidence beside the task summary in the run log.
 
 ```bash
-python -m research_agent.knowledge --list
-python -m research_agent.knowledge "within-user negative sampling"
+python -m mle_agent.research_agent.knowledge --list
+python -m mle_agent.research_agent.knowledge "within-user negative sampling"
 ```
 
 Retrieval is BM25 over Markdown sections — offline, deterministic, no embeddings or vector
 store, so any passage cited in a run log can be reproduced exactly. See
-`research_agent/knowledge/corpus/README.md` to add a method.
+`mle_agent/research_agent/knowledge/corpus/README.md` to add a method.
+
+## Evidence, recovery, and finalization
+
+Each schema-v2 experiment row records the hypothesis, reasoning, exact diff, metrics,
+execution attempts, errors, recovery outcomes, reflection, next direction, tokens, wall
+time, and intervention flag. Run summaries add the explicit stop reason, convergence
+history, per-metric deltas, provider, GPU-hours, and validation-best candidate.
+
+`./mle_agent/scripts/demo_recovery.sh` reproducibly drives the real persistent ADK tool
+loop through an invalid save, a blocked execution, a runtime traceback, and a successful
+repair using a deterministic fake provider. Its sanitized evidence is written to
+`artifacts/demo/recovery/`.
+
+After an official run converges (or honestly reaches the published hard budget), promote
+its frozen validation-best candidate with:
+
+```bash
+./mle_agent/scripts/finalize.sh \
+  --run-id <run_id> \
+  --task-definition-confirmed
+```
+
+The confirmation flag is deliberate because the supplied prose conflicts with the
+checked-in Starter Kit about the label and metrics. The trusted finalizer generates test
+predictions, runs `submit.py --check` for schema/alignment, and never scores hidden labels.

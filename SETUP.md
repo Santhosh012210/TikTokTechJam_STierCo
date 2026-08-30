@@ -68,7 +68,7 @@ that would otherwise show up as a confusing failure later.
 **Imports and paths** (instant, no data needed):
 
 ```bash
-python -c "from harness.config import load_config; c=load_config(); print(c.DATA_DIR, c.BASELINE_PRIMARY)"
+python -c "from mle_agent.harness.config import load_config; c=load_config(); print(c.DATA_DIR, c.BASELINE_PRIMARY)"
 ```
 
 Prints the dataset path and `0.6016`.
@@ -76,8 +76,7 @@ Prints the dataset path and `0.6016`.
 **Offline tests** (seconds, no API key, no data):
 
 ```bash
-python tests/test_knowledge.py
-python tests/test_adk_agent.py
+./mle_agent/scripts/test_offline.sh
 ```
 
 **Optional manual baseline preflight** (~40s, needs the dataset):
@@ -94,13 +93,13 @@ task documentation. If it does not match, the bootstrap stops before experiment 
 
 ```bash
 # single-agent dev run: one persistent Google ADK session owns the complete MLE loop
-./scripts/run_agent.sh
+./mle_agent/scripts/run_agent.sh
 
 # one-experiment smoke run: uncapped ADK calls, 30-minute outer wall budget
-./scripts/run_agent_once.sh
+./mle_agent/scripts/run_agent_once.sh
 
 # full run, only after a dev run succeeds
-AGENT_MAX_ITER=50 AGENT_WALL_HOURS=4 AGENT_MAX_TURNS=10 ./scripts/run_agent.sh
+TASK_DEFINITION_CONFIRMED=1 ./mle_agent/scripts/run_official.sh
 ```
 
 The ADK agent defaults to at most 2,048 output tokens per model call, but does not cap the
@@ -128,14 +127,24 @@ and `reports/summary.md`. See `artifacts/README.md` for promoting a run to `arti
 Check a run's log schema:
 
 ```bash
-python -m harness.validator artifacts/runs/<run_id>/logs/events.jsonl
+python -m mle_agent.harness.validator artifacts/runs/<run_id>/logs/events.jsonl
 ```
 
 Exit `0` means every row passed.
 
 ## 7. Submissions
 
-`submit.py` takes the path first, then a mode flag:
+After the authoritative task definition is confirmed and an autonomous run converges,
+promote its validation-best candidate and validate the final CSV in one command:
+
+```bash
+./mle_agent/scripts/finalize.sh --run-id <run_id> --task-definition-confirmed
+```
+
+For an official run that truthfully stopped at the hard iteration/wall budget, add
+`--allow-budget-stop`. The finalizer does not compute hidden-test metrics.
+
+The organiser utility can also be used directly. `submit.py` takes the path first, then a mode flag:
 
 ```bash
 SK=baseline_kuairand-starter-kit
@@ -150,16 +159,17 @@ row count, `row_id` continuity, and alignment. Always run `--check` before submi
 ## Other commands
 
 ```bash
-python -m research_agent.knowledge --list          # method corpus contents
-python -m research_agent.knowledge "bpr gradient"  # query it (offline)
-python tests/live_builder_smoke.py                 # live Builder check — costs tokens
+python -m mle_agent.research_agent.knowledge --list          # method corpus contents
+python -m mle_agent.research_agent.knowledge "bpr gradient"  # query it (offline)
+python -m mle_agent.tests.live_builder_smoke                 # legacy live check — costs tokens
+./mle_agent/scripts/demo_recovery.sh                         # recovery evidence
 ```
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `ModuleNotFoundError: No module named 'harness'` | Run from the repo root, and invoke as `python -m harness.main` |
+| `ModuleNotFoundError: No module named 'mle_agent'` | Run from the repository root; no installation is required |
 | `FileNotFoundError: Data directory not found` | `datasets/KuaiRand-Pure/data/` is missing the CSVs — see `datasets/README.md` |
 | Baseline primary outside ±0.002 | Dataset is incomplete or wrong. Re-download; do not proceed |
 | Google ADK API key missing | Set `GOOGLE_API_KEY` in `.env` (or retain the old Gemini `LLM_PROVIDER=gemini` + `LLM_API_KEY` block) |
