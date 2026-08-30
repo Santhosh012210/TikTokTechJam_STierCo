@@ -16,6 +16,9 @@ import subprocess
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
+
+from packaging.requirements import InvalidRequirement, Requirement
 
 from mle_agent.harness.config import Config
 from mle_agent.harness.metrics import try_extract_metrics
@@ -76,6 +79,37 @@ AGENT_TOOLS = [
             "from the training and validation view. The hidden test dates are never summarized."
         ),
         "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "inspect_environment",
+        "description": (
+            "Inspect the Python runtime and available open-source ML frameworks without importing "
+            "or installing them. Required during bootstrap so framework choice is evidence-based."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "request_dependency_install",
+        "description": (
+            "Request installation of missing PyPI packages into the run's Python environment. "
+            "The harness always asks the user for explicit permission before changing the environment; "
+            "the approval or refusal is logged as a manual intervention. URLs and pip flags are rejected."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "packages": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "One to six PyPI requirement specifiers, such as lightgbm or torch==2.8.0.",
+                },
+                "justification": {
+                    "type": "string",
+                    "description": "Why these packages are necessary for the current research hypothesis.",
+                },
+            },
+            "required": ["packages", "justification"],
+        },
     },
     SEARCH_ML_LITERATURE_TOOL,
     {
@@ -175,6 +209,16 @@ AGENT_TOOLS = [
                 },
                 "target_component": {
                     "type": "string",
+                    "enum": [
+                        "loss",
+                        "sampling",
+                        "features",
+                        "sequence",
+                        "auxiliary-task",
+                        "model",
+                        "training",
+                        "evaluation",
+                    ],
                     "description": "Primary component changed: loss, sampling, features, sequence, auxiliary-task, model, or training.",
                 },
                 "expected_effect": {
@@ -205,7 +249,7 @@ AGENT_TOOLS = [
                     "description": "How every fitted statistic avoids validation labels and future information.",
                 },
             },
-            "required": ["hypothesis", "reasoning"],
+            "required": ["hypothesis", "reasoning", "target_component"],
         },
     },
 ]
@@ -227,6 +271,8 @@ class BootstrapState:
     read_coverage: dict[str, list[tuple[int, int]]] = field(default_factory=dict)
     fully_read_paths: set[str] = field(default_factory=set)
     data_inspected: bool = False
+    environment_inspected: bool = False
+    environment_inventory: dict[str, object] | None = None
     literature_queries: list[str] = field(default_factory=list)
     baseline_reproduced: bool = False
     baseline_metrics: dict[str, object] | None = None
@@ -271,6 +317,8 @@ class BootstrapState:
             missing.append("fully read the inherited candidate model.py")
         if not self.data_inspected:
             missing.append("inspect the train/validation data")
+        if not self.environment_inspected:
+            missing.append("inspect the available ML environment")
         if not self.literature_queries:
             missing.append("search the ML literature corpus")
         if not self.baseline_reproduced:
@@ -331,6 +379,8 @@ class BootstrapState:
                 for path, ranges in sorted(self.read_coverage.items())
             },
             "data_inspected": self.data_inspected,
+            "environment_inspected": self.environment_inspected,
+            "environment_inventory": self.environment_inventory,
             "literature_queries": self.literature_queries,
             "baseline_reproduced": self.baseline_reproduced,
             "baseline_metrics": self.baseline_metrics,
@@ -585,6 +635,194 @@ def inspect_train_valid_data(config: Config) -> dict[str, object]:
     return summary
 
 
+_ML_DISTRIBUTIONS = (
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "torch",
+    "torchvision",
+    "torchrec",
+    "recbole",
+    "lightgbm",
+    "xgboost",
+    "tensorflow",
+)
+
+
+def _probe_python_environment(
+    config: Config, distributions: list[str] | tuple[str, ...]
+) -> dict[str, object]:
+    """Query the exact interpreter used for candidate execution."""
+    names = list(dict.fromkeys(distributions))
+    probe = (
+        "import importlib.metadata, json, platform, sys\n"
+        "names = json.loads(sys.argv[1])\n"
+        "packages = {}\n"
+        "for name in names:\n"
+        "    try:\n"
+        "        version = importlib.metadata.version(name)\n"
+        "    except importlib.metadata.PackageNotFoundError:\n"
+        "        version = None\n"
+        "    packages[name] = {'installed': version is not None, 'version': version}\n"
+        "print(json.dumps({\n"
+        "    'success': True,\n"
+        "    'python_executable': sys.executable,\n"
+        "    'python_version': platform.python_version(),\n"
+        "    'platform': platform.platform(),\n"
+        "    'packages': packages,\n"
+        "}))\n"
+    )
+    try:
+        result = subprocess.run(
+            [config.PYTHON_EXE, "-c", probe, json.dumps(names)],
+            cwd=str(config.PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except Exception as exc:
+        return {
+            "success": False,
+            "python_executable": config.PYTHON_EXE,
+            "python_version": None,
+            "platform": None,
+            "packages": {
+                name: {"installed": False, "version": None} for name in names
+            },
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+    if result.returncode != 0:
+        return {
+            "success": False,
+            "python_executable": config.PYTHON_EXE,
+            "python_version": None,
+            "platform": None,
+            "packages": {
+                name: {"installed": False, "version": None} for name in names
+            },
+            "error": redact_secrets((result.stdout + result.stderr)[-2000:]),
+        }
+    try:
+        parsed = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return {
+            "success": False,
+            "python_executable": config.PYTHON_EXE,
+            "python_version": None,
+            "platform": None,
+            "packages": {
+                name: {"installed": False, "version": None} for name in names
+            },
+            "error": f"environment probe returned invalid JSON: {exc}",
+        }
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("packages"), dict):
+        return {
+            "success": False,
+            "python_executable": config.PYTHON_EXE,
+            "python_version": None,
+            "platform": None,
+            "packages": {
+                name: {"installed": False, "version": None} for name in names
+            },
+            "error": "environment probe returned an invalid object",
+        }
+    return parsed
+
+
+def inspect_ml_environment(config: Config) -> dict[str, object]:
+    """Return package availability without importing heavyweight frameworks."""
+    inventory = _probe_python_environment(config, _ML_DISTRIBUTIONS)
+    inventory["policy"] = (
+        "The hackathon permits any open-source library or framework. Use an installed "
+        "framework when it supports the hypothesis; request explicit user approval before "
+        "installing a missing dependency."
+    )
+    return inventory
+
+
+def _validated_requirements(packages: object) -> list[tuple[str, Requirement]]:
+    if not isinstance(packages, list) or not 1 <= len(packages) <= 6:
+        raise ValueError("packages must contain between one and six PyPI requirements")
+    validated: list[tuple[str, Requirement]] = []
+    for raw in packages:
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("every package requirement must be a non-empty string")
+        try:
+            requirement = Requirement(raw.strip())
+        except InvalidRequirement as exc:
+            raise ValueError(f"invalid PyPI requirement {raw!r}: {exc}") from exc
+        if requirement.url is not None or requirement.marker is not None:
+            raise ValueError("dependency URLs and environment markers are not allowed")
+        validated.append((str(requirement), requirement))
+    return validated
+
+
+def _requirement_is_satisfied(
+    requirement: Requirement, package_inventory: dict[str, object]
+) -> bool:
+    details = package_inventory.get(requirement.name, {})
+    if not isinstance(details, dict) or not details.get("installed"):
+        return False
+    installed = str(details.get("version", ""))
+    if requirement.extras:
+        return False
+    return not requirement.specifier or requirement.specifier.contains(
+        installed, prereleases=True
+    )
+
+
+def install_python_dependencies(
+    config: Config, requirements: list[str], timeout_seconds: int = 1200
+) -> dict[str, object]:
+    """Install validated PyPI requirements without invoking a shell."""
+    command = [config.PYTHON_EXE, "-m", "pip", "install", *requirements]
+    try:
+        result = subprocess.run(
+            command,
+            cwd=str(config.PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+        output = redact_secrets(result.stdout + result.stderr)
+        requested_names = [Requirement(spec).name for spec in requirements]
+        installed_packages = _probe_python_environment(
+            config, requested_names
+        )["packages"]
+        installed_versions = {
+            name: (
+                details.get("version")
+                if isinstance(details, dict) and details.get("installed")
+                else None
+            )
+            for name, details in installed_packages.items()
+        }
+        return {
+            "success": result.returncode == 0,
+            "returncode": result.returncode,
+            "requirements": requirements,
+            "installed_versions": installed_versions,
+            "output_tail": output[-4000:],
+        }
+    except subprocess.TimeoutExpired as exc:
+        output = redact_secrets((exc.stdout or "") + (exc.stderr or ""))
+        return {
+            "success": False,
+            "requirements": requirements,
+            "installed_versions": {},
+            "error": f"dependency installation timed out after {timeout_seconds}s",
+            "output_tail": output[-4000:],
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "requirements": requirements,
+            "installed_versions": {},
+            "error": f"{type(exc).__name__}: {exc}",
+            "output_tail": "",
+        }
+
+
 class AgentToolRuntime:
     """Per-iteration dispatcher with captured experiment evidence."""
 
@@ -593,10 +831,15 @@ class AgentToolRuntime:
         candidate_dir: Path,
         config: Config,
         bootstrap_state: BootstrapState | None = None,
+        dependency_approver: Callable[[list[str], str], bool] | None = None,
+        dependency_installer: Callable[[Config, list[str]], dict[str, object]] | None = None,
     ) -> None:
         self.candidate_dir = candidate_dir
         self.config = config
         self.bootstrap_state = bootstrap_state or BootstrapState()
+        self.dependency_approver = dependency_approver
+        self.dependency_installer = dependency_installer or install_python_dependencies
+        self.dependency_events: list[dict[str, object]] = []
         self.executions: list[dict] = []
         self.model_post_save_failed = False
         self.inherited_model_fingerprint = semantic_model_fingerprint(
@@ -709,6 +952,99 @@ class AgentToolRuntime:
             summary = inspect_train_valid_data(self.config)
             self.bootstrap_state.data_inspected = True
             return json.dumps(summary, indent=2)
+        if name == "inspect_environment":
+            inventory = inspect_ml_environment(self.config)
+            self.bootstrap_state.environment_inspected = True
+            self.bootstrap_state.environment_inventory = inventory
+            return json.dumps(inventory, ensure_ascii=False, indent=2)
+        if name == "request_dependency_install":
+            if not self.bootstrap_state.complete:
+                return self._bootstrap_rejection("request_dependency_install")
+            justification = str(payload.get("justification", "")).strip()
+            if not justification:
+                return json.dumps({
+                    "success": False,
+                    "error": "DEPENDENCY_JUSTIFICATION_REQUIRED",
+                }, ensure_ascii=False, indent=2)
+            try:
+                validated = _validated_requirements(payload.get("packages"))
+            except ValueError as exc:
+                return json.dumps({
+                    "success": False,
+                    "error": "INVALID_DEPENDENCY_REQUEST",
+                    "detail": str(exc),
+                }, ensure_ascii=False, indent=2)
+            requested_environment = _probe_python_environment(
+                self.config, [requirement.name for _, requirement in validated]
+            )
+            pending = [
+                spec
+                for spec, requirement in validated
+                if not _requirement_is_satisfied(
+                    requirement, requested_environment["packages"]
+                )
+            ]
+            if not pending:
+                return json.dumps({
+                    "success": True,
+                    "status": "ALREADY_AVAILABLE",
+                    "requirements": [spec for spec, _ in validated],
+                    "environment": inspect_ml_environment(self.config),
+                }, ensure_ascii=False, indent=2)
+            if self.dependency_approver is None:
+                event = {
+                    "type": "dependency_install",
+                    "requirements": pending,
+                    "justification": justification,
+                    "approved": False,
+                    "success": False,
+                    "human_intervention": False,
+                    "outcome": "approval_unavailable",
+                }
+                self.dependency_events.append(event)
+                return json.dumps({
+                    **event,
+                    "error": "DEPENDENCY_APPROVAL_UNAVAILABLE",
+                }, ensure_ascii=False, indent=2)
+            try:
+                approved = bool(self.dependency_approver(pending, justification))
+            except (EOFError, KeyboardInterrupt):
+                approved = False
+            event = {
+                "type": "dependency_install",
+                "requirements": pending,
+                "justification": justification,
+                "approved": approved,
+                "human_intervention": True,
+            }
+            if not approved:
+                event.update({"success": False, "outcome": "user_declined"})
+                self.dependency_events.append(event)
+                return json.dumps({
+                    **event,
+                    "error": "DEPENDENCY_INSTALL_DECLINED",
+                    "instruction": "Choose an installed alternative or revise the experiment.",
+                }, ensure_ascii=False, indent=2)
+            install_result = self.dependency_installer(self.config, pending)
+            event.update({
+                "success": bool(install_result.get("success")),
+                "outcome": "installed" if install_result.get("success") else "install_failed",
+                "installed_versions": install_result.get("installed_versions", {}),
+                "error": install_result.get("error"),
+                "output_tail": str(install_result.get("output_tail", ""))[-1000:],
+            })
+            self.dependency_events.append(event)
+            if install_result.get("success"):
+                self.bootstrap_state.environment_inventory = inspect_ml_environment(self.config)
+            return json.dumps({
+                **event,
+                "output_tail": event["output_tail"],
+                "instruction": (
+                    "Dependency is available; implement and evaluate the justified experiment."
+                    if install_result.get("success")
+                    else "Read the installer error and choose a compatible framework or version."
+                ),
+            }, ensure_ascii=False, indent=2)
         if name == "search_ml_literature":
             query = str(payload["query"])
             results = search_ml_literature(query, int(payload.get("k", 3)))
@@ -910,8 +1246,27 @@ class AgentToolRuntime:
                 self.candidate_dir / "model.py"
             )
             candidate_changed = candidate_fingerprint != self.inherited_model_fingerprint
+            allowed_components = {
+                "loss", "sampling", "features", "sequence", "auxiliary-task",
+                "model", "training", "evaluation",
+            }
+            target_component = str(payload.get("target_component", "")).strip().lower()
+            if target_component not in allowed_components:
+                record = {
+                    "hypothesis": str(payload.get("hypothesis", "")),
+                    "reasoning": str(payload.get("reasoning", "")),
+                    "literature_chunk_ids": list(payload.get("literature_chunk_ids", [])),
+                    "proposal": {"target_component": target_component},
+                    "success": False,
+                    "metrics": None,
+                    "error": "INVALID_TARGET_COMPONENT: declare one supported pipeline component",
+                    "wall_seconds": 0.0,
+                    "candidate_changed": candidate_changed,
+                }
+                self.executions.append(record)
+                return json.dumps(record, ensure_ascii=False, indent=2)
             proposal = {
-                "target_component": str(payload.get("target_component", "agent_selected")),
+                "target_component": target_component,
                 "expected_effect": str(payload.get("expected_effect", "")),
                 "falsification_criterion": str(
                     payload.get("falsification_criterion", "")
@@ -990,7 +1345,6 @@ class AgentToolRuntime:
                 "watch-time",
                 "auxiliary-task",
             }
-            target_component = proposal["target_component"].strip().lower()
             if target_component in feature_components and any(
                 not proposal[field_name]
                 for field_name in (

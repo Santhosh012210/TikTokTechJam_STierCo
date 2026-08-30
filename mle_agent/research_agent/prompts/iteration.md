@@ -15,12 +15,21 @@ ${experiment_ledger}
 
 Choose a non-redundant, evidence-backed change. Before editing, form one compact proposal with:
 the observation, precise hypothesis, primary target component, literature or prior-run evidence,
-expected metric effect, falsification criterion, smallest implementation, and rollback plan.
-Pass the structured proposal fields to `run_model`. Prefer one attributable change. Do not repeat
+expected metric effect, falsification criterion, implementation plan, and rollback plan. The plan
+must be sufficiently complete to test the hypothesis faithfully; implementation size is not an
+optimization target.
+Pass every structured proposal field to `run_model`, including one required `target_component`
+category. Prefer one attributable change. Do not repeat
 a measured dead end, prior hypothesis, or already-scored semantic candidate. Search across loss,
 sampling, sequence/history, auxiliary signals, watch-time, leakage-safe aggregate/cross features,
 time/shift, and model structure rather than falling back to arbitrary capacity or learning-rate
 changes.
+
+The official NumPy FM is a starting point, not the solution boundary. Consider complete pipeline
+or model replacements and established open-source frameworks when they offer a better test of the
+hypothesis. Use `inspect_environment` evidence retained from bootstrap. If a required package is
+missing, call `request_dependency_install` with the narrow package list and a concrete justification;
+continue only after the harness reports it installed. Never invoke pip from `model.py`.
 
 Feature engineering uses the filtered `candidate_data` passed through `--data_dir`; never rewrite
 the raw CSVs. Keep every scored feature pipeline self-contained in `model.py`. Do not repeat the

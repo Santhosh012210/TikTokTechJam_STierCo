@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from google.adk.agents import Agent
 from google.adk.agents.run_config import RunConfig
@@ -112,6 +112,7 @@ class ResearchAgent:
         provider_label: str | None = None,
         quota_input: Callable[[str], str] = input,
         quota_sleep: Callable[[float], None] = time.sleep,
+        dependency_input: Callable[[str], str] = input,
     ) -> None:
         self.config = config
         if model is None:
@@ -125,6 +126,7 @@ class ResearchAgent:
         self._event_writer = event_writer
         self._quota_input = quota_input
         self._quota_sleep = quota_sleep
+        self._dependency_input = dependency_input
         self._quota_resume_approved: bool | None = None
         self._quota_pause_count = 0
         self._experiment_memory: list[dict[str, object]] = []
@@ -258,6 +260,31 @@ class ResearchAgent:
                 return True
             if answer in {"n", "no"}:
                 self._quota_resume_approved = False
+                return False
+            print("Please answer y or n.")
+
+    def _approve_dependency_install(
+        self, requirements: list[str], justification: str
+    ) -> bool:
+        console.harness(
+            "Dependency installation requested",
+            packages=", ".join(requirements),
+            reason=justification,
+            environment=self.config.PYTHON_EXE,
+        )
+        prompt = (
+            "Allow the agent to install these packages into the project environment: "
+            + ", ".join(requirements)
+            + "? [y/n]: "
+        )
+        while True:
+            try:
+                answer = self._dependency_input(prompt).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = "n"
+            if answer in {"y", "yes"}:
+                return True
+            if answer in {"n", "no"}:
                 return False
             print("Please answer y or n.")
 
@@ -625,6 +652,21 @@ class ResearchAgent:
             """Inspect a deterministic train/validation-only data summary."""
             return dispatch("inspect_data", {})
 
+        def inspect_environment(tool_context: ToolContext = None) -> dict[str, Any]:
+            """Inspect installed ML frameworks and Python runtime details."""
+            return dispatch("inspect_environment", {})
+
+        def request_dependency_install(
+            packages: list[str],
+            justification: str,
+            tool_context: ToolContext = None,
+        ) -> dict[str, Any]:
+            """Ask the user before installing validated PyPI dependencies."""
+            return dispatch("request_dependency_install", {
+                "packages": packages,
+                "justification": justification,
+            })
+
         def search_ml_literature(
             query: str,
             k: int = 3,
@@ -677,8 +719,17 @@ class ResearchAgent:
         def run_model(
             hypothesis: str,
             reasoning: str,
+            target_component: Literal[
+                "loss",
+                "sampling",
+                "features",
+                "sequence",
+                "auxiliary-task",
+                "model",
+                "training",
+                "evaluation",
+            ],
             literature_chunk_ids: list[str] | None = None,
-            target_component: str = "agent_selected",
             expected_effect: str = "",
             falsification_criterion: str = "",
             rollback_plan: str = "retain incumbent",
@@ -706,6 +757,8 @@ class ResearchAgent:
             read_file,
             write_file,
             inspect_data,
+            inspect_environment,
+            request_dependency_install,
             search_ml_literature,
             reproduce_baseline,
             record_task_context,
@@ -726,6 +779,7 @@ class ResearchAgent:
             ),
             bool(state.required_candidate_model_path and state.required_candidate_model_path in state.fully_read_paths),
             state.data_inspected,
+            state.environment_inspected,
             bool(state.literature_queries),
             state.baseline_reproduced,
             state.task_context is not None,
@@ -839,7 +893,12 @@ class ResearchAgent:
                 error=None,
             )
 
-        runtime = AgentToolRuntime(candidate_dir, self.config, self.bootstrap_state)
+        runtime = AgentToolRuntime(
+            candidate_dir,
+            self.config,
+            self.bootstrap_state,
+            dependency_approver=self._approve_dependency_install,
+        )
         call_budget_label = max_turns if max_turns > 0 else "unlimited"
         bootstrap_prompt = render_prompt(
             "bootstrap.md", candidate_dir=candidate_dir, max_turns=call_budget_label
@@ -936,7 +995,12 @@ class ResearchAgent:
                 final_code=model_path.read_text(encoding="utf-8") if model_path.exists() else None,
             )
 
-        runtime = AgentToolRuntime(candidate_dir, self.config, self.bootstrap_state)
+        runtime = AgentToolRuntime(
+            candidate_dir,
+            self.config,
+            self.bootstrap_state,
+            dependency_approver=self._approve_dependency_install,
+        )
         call_budget_label = max_turns if max_turns > 0 else "unlimited"
         iteration_prompt = render_prompt(
             "iteration.md",
@@ -1062,6 +1126,7 @@ class ResearchAgent:
         if best_execution is not None and not reflection:
             reflection = "ADK produced validation metrics but no closing reflection."
 
+        recovery_events.extend(runtime.dependency_events)
         if best_execution is not None:
             for index, execution in enumerate(runtime.executions):
                 if execution.get("success"):
@@ -1101,7 +1166,7 @@ class ResearchAgent:
             "status": "success" if result.success else "failed",
             "hypothesis": result.hypothesis,
             "target_component": chosen_proposal.get(
-                "target_component", "agent_selected"
+                "target_component", "unclassified"
             ),
             "primary": (
                 result.metrics.get("primary") if result.metrics is not None else None

@@ -90,6 +90,7 @@ class ResearchAgent:
         bootstrap_state: BootstrapState | None = None,
         event_writer: Callable[[dict], None] | None = None,
         provider_label: str | None = None,
+        dependency_input: Callable[[str], str] = input,
     ) -> None:
         self.config = config
         self.client = client or make_client()
@@ -112,6 +113,7 @@ class ResearchAgent:
         self._bootstrapped = self.bootstrap_state.complete
         self._event_writer = event_writer
         self._provider_label = provider_label or type(self.client).__name__
+        self._dependency_input = dependency_input
         self._provider_call_attempts = 0
         self._llm_response_count = 0
         self._last_response_trace: dict[str, object] = {}
@@ -140,6 +142,31 @@ class ResearchAgent:
     def _emit_trace_event(self, event: dict[str, object]) -> None:
         if self._event_writer is not None:
             self._event_writer(event)
+
+    def _approve_dependency_install(
+        self, requirements: list[str], justification: str
+    ) -> bool:
+        console.harness(
+            "Dependency installation requested",
+            packages=", ".join(requirements),
+            reason=justification,
+            environment=self.config.PYTHON_EXE,
+        )
+        prompt = (
+            "Allow the agent to install these packages into the project environment: "
+            + ", ".join(requirements)
+            + "? [y/n]: "
+        )
+        while True:
+            try:
+                answer = self._dependency_input(prompt).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = "n"
+            if answer in {"y", "yes"}:
+                return True
+            if answer in {"n", "no"}:
+                return False
+            print("Please answer y or n.")
 
     def _safe_tool_call(self, tool_call) -> dict[str, object]:
         payload = dict(tool_call.input)
@@ -229,6 +256,7 @@ class ResearchAgent:
                 and state.required_candidate_model_path in state.fully_read_paths
             ),
             state.data_inspected,
+            state.environment_inspected,
             bool(state.literature_queries),
             state.baseline_reproduced,
             state.task_context is not None,
@@ -367,7 +395,12 @@ class ResearchAgent:
                 error=None,
             )
 
-        runtime = AgentToolRuntime(candidate_dir, self.config, self.bootstrap_state)
+        runtime = AgentToolRuntime(
+            candidate_dir,
+            self.config,
+            self.bootstrap_state,
+            dependency_approver=self._approve_dependency_install,
+        )
         total_input = 0
         total_output = 0
         recovery_events: list[dict] = []
@@ -513,7 +546,12 @@ class ResearchAgent:
                     model_path.read_text(encoding="utf-8") if model_path.exists() else None
                 ),
             )
-        runtime = AgentToolRuntime(candidate_dir, self.config, self.bootstrap_state)
+        runtime = AgentToolRuntime(
+            candidate_dir,
+            self.config,
+            self.bootstrap_state,
+            dependency_approver=self._approve_dependency_install,
+        )
         total_input = 0
         total_output = 0
         last_text = ""
@@ -761,6 +799,7 @@ class ResearchAgent:
             except (json.JSONDecodeError, AttributeError):
                 pass
 
+        recovery_events.extend(runtime.dependency_events)
         return AgentIterationResult(
             success=best_execution is not None,
             hypothesis=str(chosen["hypothesis"]) if chosen else "Agent produced no experiment",

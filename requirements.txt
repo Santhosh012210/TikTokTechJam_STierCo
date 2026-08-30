@@ -1,6 +1,10 @@
 # Core numerical dependency used by the official baseline and generated models.
 numpy
 
+# Parse and validate agent-requested PyPI requirement specifiers before any
+# user-approved runtime installation. URLs, markers, and pip flags are rejected.
+packaging>=24
+
 # Active autonomous agent runtime. Google ADK owns the persistent session,
 # model/tool loop, callbacks, and events; Gemini inference is configured with
 # GOOGLE_API_KEY and ADK_MODEL.

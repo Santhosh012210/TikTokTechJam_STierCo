@@ -69,6 +69,7 @@ class RecoveryDemoModel(BaseLlm):
                 args={
                     "hypothesis": "Demonstrate bounded automatic candidate recovery",
                     "reasoning": "First verify that the syntax gate blocks invalid Python.",
+                    "target_component": "model",
                     "literature_chunk_ids": [],
                 },
             )]
@@ -86,6 +87,7 @@ class RecoveryDemoModel(BaseLlm):
                 args={
                     "hypothesis": "Demonstrate bounded automatic candidate recovery",
                     "reasoning": "Run the syntax-valid candidate and inspect its traceback.",
+                    "target_component": "model",
                     "literature_chunk_ids": [],
                 },
             )]
@@ -103,6 +105,7 @@ class RecoveryDemoModel(BaseLlm):
                 args={
                     "hypothesis": "Demonstrate bounded automatic candidate recovery",
                     "reasoning": "Verify that the repaired candidate completes and scores.",
+                    "target_component": "model",
                     "literature_chunk_ids": [],
                 },
             )]

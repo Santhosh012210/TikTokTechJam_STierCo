@@ -36,6 +36,22 @@ measured dead ends, and promising directions from the starter-kit sources. Do no
 them from prior knowledge. The starter-kit implementation is authoritative wherever other
 prose conflicts with it.
 
+# Hackathon research scope
+
+The inherited NumPy FM is the official reference and reproducible starting point, not an
+implementation boundary. The challenge explicitly permits any open-source library or framework
+(including PyTorch, RecBole, TorchRec, LightGBM, and similar tools) and changes to any stage of the
+pipeline. Select implementation scope based on what is needed to test the hypothesis faithfully.
+Substantial feature pipelines, model replacements, loss rewrites, training changes, and complete
+`model.py` rewrites are valid when evidence justifies them. Do not prefer a small diff when it would
+turn the proposed method into a superficial proxy.
+
+Inspect the available ML environment during bootstrap. Use installed frameworks when they are a
+good fit. If a justified experiment needs a missing package, call `request_dependency_install`;
+the harness will ask the user before modifying the environment and log that manual intervention.
+Never run pip or another package manager from candidate code. If permission is refused or
+installation fails, route to an installed alternative rather than abandoning the research loop.
+
 # Console progress
 
 For every response, provide one short decision summary suitable for showing on the user
@@ -79,11 +95,12 @@ candidate:
    `read_file` is paginated: whenever `complete` is false, call it again with the exact
    `next_offset` until the whole file has been read.
 3. Call `inspect_data` for the enforced train/validation-only EDA.
-4. Call `search_ml_literature` with a query relevant to the observed benchmark and
+4. Call `inspect_environment` to learn which ML frameworks are actually available.
+5. Call `search_ml_literature` with a query relevant to the observed benchmark and
    baseline.
-5. Call `reproduce_baseline` while the inherited baseline `model.py` is still unchanged.
+6. Call `reproduce_baseline` while the inherited baseline `model.py` is still unchanged.
    Interpret the returned validation metrics and confirm they match the official score.
-6. Call `record_task_context` with the most important objective, label, metrics, fixed
+7. Call `record_task_context` with the most important objective, label, metrics, fixed
    splits, baseline, evaluation protocol, constraints, dead ends, promising directions,
    candidate contract, and source paths. Its feature-engineering context must name the five
    baseline fields, record the organizer's measured no-gain result for all 13 static fields,
@@ -99,7 +116,8 @@ For every experiment:
 
 1. Inspect the inherited candidate and relevant evidence.
 2. State one precise hypothesis and why it may improve the fixed ranking metrics.
-3. Implement the hypothesis in the candidate `model.py`; do not merely describe it.
+3. Implement the hypothesis faithfully in the candidate `model.py`; do not reduce a substantial
+   published method to a misleading minimal proxy merely to keep the diff small.
 4. Call `run_model` with the hypothesis, reasoning, and any literature chunk IDs. For a feature,
    sequence/history, temporal, watch-time, or auxiliary-signal experiment, also declare the exact
    feature sources, transformations, and leakage controls. Fit vocabularies, buckets, aggregates,

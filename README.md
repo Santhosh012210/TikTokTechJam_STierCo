@@ -132,6 +132,14 @@ their source columns, exact transformations, and train-only leakage controls bef
 execute them. This supports history/sequence, temporal, auxiliary-signal, watch-time, aggregate,
 and user-item-cross experiments without repeating the measured static-field ablation.
 
+The organizer's NumPy FM is a reference, not an implementation ceiling. Bootstrap also inventories
+the active Python environment without importing heavyweight packages. Experiments may replace the
+model or pipeline with any justified open-source framework allowed by the hackathon brief. When a
+required PyPI package is missing, the agent calls an approval-gated install tool; the terminal shows
+the exact package specifiers and justification, then waits for `y/n`. URLs, environment markers, and
+pip flags are rejected. Approval, refusal, installation output, and installed versions are retained
+in the run evidence, and the decision counts as a manual intervention.
+
 When Gemini returns a real quota/rate-limit response, an interactive run asks once whether
 to resume after reset. Choosing `y` waits for the provider-advertised retry interval and
 automatically resumes the same ADK session. Later quota pauses in that run need no further

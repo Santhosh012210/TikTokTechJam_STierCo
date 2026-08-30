@@ -64,7 +64,7 @@ def _log_row(
         "parent_iteration": parent_iteration,
         "hypothesis": result.hypothesis,
         "hypothesis_source": "single_agent",
-        "target_component": str(proposal.get("target_component", "agent_selected")),
+        "target_component": str(proposal.get("target_component", "unclassified")),
         "feature_engineering": {
             "sources": list(proposal.get("feature_sources", [])),
             "transformations": list(proposal.get("feature_transformations", [])),

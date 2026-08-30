@@ -138,6 +138,9 @@ class RunConsole:
             return f"write_file(path={payload.get('path', '?')}, chars={len(content)})"
         if name == "search_ml_literature":
             return f"search_ml_literature(query={payload.get('query', '')!r})"
+        if name == "request_dependency_install":
+            packages = ", ".join(str(item) for item in payload.get("packages", []))
+            return f"request_dependency_install(packages={packages!r})"
         if name == "record_task_context":
             return f"record_task_context(objective={payload.get('task_objective', '')!r})"
         if name == "run_model":
@@ -180,6 +183,17 @@ class RunConsole:
                 f"policy={payload.get('policy', '?')}.",
                 success,
             )
+        if name == "inspect_environment":
+            packages = payload.get("packages", {})
+            installed = [
+                name for name, details in packages.items()
+                if isinstance(details, dict) and details.get("installed")
+            ]
+            return f"Installed ML packages: {', '.join(installed) or 'none detected'}.", success
+        if name == "request_dependency_install":
+            requirements = ", ".join(str(item) for item in payload.get("requirements", []))
+            outcome = payload.get("outcome") or payload.get("status") or payload.get("error")
+            return f"Dependencies={requirements or '?'}; outcome={outcome}.", success
         if name == "search_ml_literature":
             hits = payload.get("results", [])
             chunk_ids = [str(hit.get("chunk_id", "?")) for hit in hits[:3]]

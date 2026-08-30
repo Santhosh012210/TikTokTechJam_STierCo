@@ -55,6 +55,7 @@ class _FakeADKModel(BaseLlm):
                     args={
                         "hypothesis": "Exercise the native Google ADK tool loop",
                         "reasoning": "Verify ADK orchestration while retaining harness execution.",
+                        "target_component": "model",
                         "literature_chunk_ids": [],
                     },
                 ),
@@ -160,7 +161,7 @@ def test_google_adk_owns_the_persistent_tool_loop() -> None:
             "iteration": 1,
             "status": "success",
             "hypothesis": "Exercise the native Google ADK tool loop",
-            "target_component": "agent_selected",
+            "target_component": "model",
             "primary": 0.605,
             "hypothesis_supported": True,
             "finding": "ADK retained the tool history and returned metrics.",
@@ -237,6 +238,18 @@ def test_task_context_tool_requires_validation_split_key() -> None:
     ]
     assert feature_schema["additionalProperties"] is False
 
+    tool_names = {tool.__name__ for tool in agent._agent.tools}
+    assert {"inspect_environment", "request_dependency_install"} <= tool_names
+    run_function = next(
+        tool for tool in agent._agent.tools if tool.__name__ == "run_model"
+    )
+    run_schema = FunctionTool(func=run_function)._get_declaration().parameters_json_schema
+    assert "target_component" in run_schema["required"]
+    assert set(run_schema["properties"]["target_component"]["enum"]) == {
+        "loss", "sampling", "features", "sequence", "auxiliary-task",
+        "model", "training", "evaluation",
+    }
+
 
 def test_successful_context_on_last_call_completes_without_summary_call() -> None:
     config = Config()
@@ -269,6 +282,8 @@ def test_successful_context_on_last_call_completes_without_summary_call() -> Non
             required_candidate_model_path=paths[5],
             fully_read_paths=set(paths),
             data_inspected=True,
+            environment_inspected=True,
+            environment_inventory={"packages": {"numpy": {"installed": True}}},
             literature_queries=["within-user ranking"],
             baseline_reproduced=True,
             baseline_metrics={"GAUC": 0.6674, "nDCG@5": 0.5358, "primary": 0.6016},

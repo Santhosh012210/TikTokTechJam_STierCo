@@ -15,6 +15,7 @@ from mle_agent.harness.agent_tools import (
     AgentToolRuntime,
     BootstrapState,
     execute_model,
+    inspect_ml_environment,
     inspect_train_valid_data,
 )
 from mle_agent.harness.config import load_config
@@ -163,6 +164,7 @@ def test_run_model_skips_after_failed_save_until_model_is_repaired():
             skipped = json.loads(runtime.dispatch("run_model", {
                 "hypothesis": "Exercise the failed-save gate",
                 "reasoning": "A queued execution must not run invalid Python.",
+                "target_component": "model",
             }))
 
             assert failed_save.startswith("FAILED:")
@@ -178,6 +180,7 @@ def test_run_model_skips_after_failed_save_until_model_is_repaired():
             executed = json.loads(runtime.dispatch("run_model", {
                 "hypothesis": "Exercise the repaired-save gate",
                 "reasoning": "A successful save must re-enable execution.",
+                "target_component": "model",
             }))
 
             assert repaired_save.startswith("OK:")
@@ -250,7 +253,11 @@ def _write_and_run_calls(call_prefix: str, hypothesis: str, reasoning: str):
         ToolCall(
             id=f"{call_prefix}_run",
             name="run_model",
-            input={"hypothesis": hypothesis, "reasoning": reasoning},
+            input={
+                "hypothesis": hypothesis,
+                "reasoning": reasoning,
+                "target_component": "model",
+            },
         ),
     ]
 
@@ -262,7 +269,11 @@ def test_run_model_rejects_unchanged_and_comment_only_candidates():
         initial = "value = 1\n"
         trial.joinpath("model.py").write_text(initial, encoding="utf-8")
         runtime = AgentToolRuntime(trial, config, BootstrapState(required=False))
-        payload = {"hypothesis": "Change behavior", "reasoning": "Test the guard."}
+        payload = {
+            "hypothesis": "Change behavior",
+            "reasoning": "Test the guard.",
+            "target_component": "model",
+        }
 
         unchanged = json.loads(runtime.dispatch("run_model", payload))
         assert not unchanged["success"]
@@ -291,6 +302,7 @@ def test_run_model_accepts_a_semantically_changed_candidate():
         result = json.loads(runtime.dispatch("run_model", {
             "hypothesis": "Change executable model code",
             "reasoning": "A semantic edit must be measured.",
+            "target_component": "model",
         }))
         assert result["success"]
         assert result["candidate_changed"]
@@ -313,6 +325,7 @@ def test_run_model_rejects_a_previously_scored_semantic_candidate():
         scored = json.loads(first.dispatch("run_model", {
             "hypothesis": "First scoring of this candidate",
             "reasoning": "Establish the semantic fingerprint.",
+            "target_component": "model",
         }))
         assert scored["success"]
 
@@ -321,6 +334,7 @@ def test_run_model_rejects_a_previously_scored_semantic_candidate():
         duplicate = json.loads(second.dispatch("run_model", {
             "hypothesis": "Accidental duplicate",
             "reasoning": "This should be rejected before execution.",
+            "target_component": "model",
         }))
 
         assert not duplicate["success"]
@@ -498,6 +512,8 @@ def test_completed_task_context_persists_across_iteration_runtimes():
             response = json.loads(first_runtime.dispatch("read_file", {"path": path}))
             assert response["complete"]
         state.data_inspected = True
+        state.environment_inspected = True
+        state.environment_inventory = {"packages": {"numpy": {"installed": True}}}
         state.literature_queries.append("ranking losses for recommender systems")
         state.baseline_reproduced = True
         state.baseline_metrics = {"GAUC": 0.6674, "nDCG@5": 0.5358, "primary": 0.6016}
@@ -732,6 +748,7 @@ class _BootstrapThenExecuteClient(_FakeClient):
                         input={"path": self.model, "offset": 0},
                     ),
                     ToolCall(id="inspect", name="inspect_data", input={}),
+                    ToolCall(id="inspect_environment", name="inspect_environment", input={}),
                     ToolCall(
                         id="literature", name="search_ml_literature",
                         input={"query": "within-user pairwise ranking loss"},
@@ -1183,6 +1200,102 @@ def test_feature_experiment_requires_sources_transforms_and_leakage_controls():
         scored = json.loads(runtime.dispatch("run_model", payload))
         assert scored["success"]
         assert scored["proposal"]["feature_sources"] == payload["feature_sources"]
+
+
+def test_environment_inventory_reports_framework_availability_without_importing():
+    inventory = inspect_ml_environment(load_config())
+
+    assert inventory["python_version"]
+    assert inventory["python_executable"]
+    assert inventory["packages"]["numpy"]["installed"]
+    assert set(inventory["packages"]) >= {
+        "pandas", "scikit-learn", "torch", "recbole", "lightgbm",
+    }
+    assert "open-source" in inventory["policy"]
+
+
+def test_dependency_install_requires_approval_and_records_the_intervention():
+    config = load_config()
+    approvals: list[tuple[list[str], str]] = []
+    installs: list[list[str]] = []
+
+    def approve(requirements: list[str], justification: str) -> bool:
+        approvals.append((requirements, justification))
+        return True
+
+    def install(_config, requirements: list[str]) -> dict[str, object]:
+        installs.append(requirements)
+        return {
+            "success": True,
+            "requirements": requirements,
+            "installed_versions": {"hackathon-ml-framework": "1.2.3"},
+            "output_tail": "installed",
+        }
+
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        runtime = AgentToolRuntime(
+            trial,
+            config,
+            BootstrapState(required=False),
+            dependency_approver=approve,
+            dependency_installer=install,
+        )
+
+        result = json.loads(runtime.dispatch("request_dependency_install", {
+            "packages": ["hackathon-ml-framework==1.2.3"],
+            "justification": "Faithfully evaluate a framework-backed ranking model.",
+        }))
+
+        assert result["success"]
+        assert result["approved"]
+        assert approvals == [(
+            ["hackathon-ml-framework==1.2.3"],
+            "Faithfully evaluate a framework-backed ranking model.",
+        )]
+        assert installs == [["hackathon-ml-framework==1.2.3"]]
+        assert runtime.dependency_events == [{
+            "type": "dependency_install",
+            "requirements": ["hackathon-ml-framework==1.2.3"],
+            "justification": "Faithfully evaluate a framework-backed ranking model.",
+            "approved": True,
+            "human_intervention": True,
+            "success": True,
+            "outcome": "installed",
+            "installed_versions": {"hackathon-ml-framework": "1.2.3"},
+            "error": None,
+            "output_tail": "installed",
+        }]
+
+
+def test_dependency_request_rejects_urls_and_respects_user_refusal():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        installs: list[list[str]] = []
+        runtime = AgentToolRuntime(
+            trial,
+            config,
+            BootstrapState(required=False),
+            dependency_approver=lambda _requirements, _justification: False,
+            dependency_installer=lambda _config, requirements: installs.append(requirements),
+        )
+
+        invalid = json.loads(runtime.dispatch("request_dependency_install", {
+            "packages": ["framework @ https://example.com/package.whl"],
+            "justification": "Use a remote wheel.",
+        }))
+        declined = json.loads(runtime.dispatch("request_dependency_install", {
+            "packages": ["hackathon-declined-framework"],
+            "justification": "Test an optional model family.",
+        }))
+
+        assert invalid["error"] == "INVALID_DEPENDENCY_REQUEST"
+        assert declined["error"] == "DEPENDENCY_INSTALL_DECLINED"
+        assert declined["human_intervention"]
+        assert installs == []
 
 
 def main() -> None:

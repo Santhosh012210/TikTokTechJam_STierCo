@@ -119,6 +119,12 @@ to disable it or `FORCE_COLOR=1` to force ANSI colour output. Each Agent block i
 up to five sanitized lines of the provider's assistant text. Function-call-only responses
 are labelled explicitly instead of being presented as hidden reasoning.
 
+The agent may also pause when a concrete experiment needs a missing open-source dependency. It
+prints the exact validated PyPI requirements and its justification, then asks whether to install
+them into `.venv`. Answering `y` permits only that request; answering `n` instructs the agent to use
+an installed alternative. Each decision is logged as a manual intervention. The agent cannot pass
+pip flags or URLs and is instructed never to invoke a package manager from generated model code.
+
 Trial code goes to the gitignored `experiment_workspace/<run_id>/trial_NNN/`. Durable
 evidence goes to `artifacts/runs/<run_id>/` as `logs/events.jsonl`,
 `logs/llm_events.jsonl`, `results/metrics.json`,
