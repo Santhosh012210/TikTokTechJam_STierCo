@@ -1725,6 +1725,70 @@ def test_a_real_experiment_still_requires_genuine_reasoning():
     assert any("reasoning must be non-empty" in error for error in validate_row(row))
 
 
+def _write_run_metrics(artifacts_root: Path, run_id: str, metrics: dict) -> None:
+    results = artifacts_root / "runs" / run_id / "results"
+    results.mkdir(parents=True)
+    (results / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+
+
+def test_finalization_refuses_runs_it_must_not_promote():
+    """The guards that run before anything is generated or overwritten."""
+    from mle_agent.harness import finalize as finalize_module
+
+    original_artifacts = finalize_module.Config.ARTIFACTS_DIR
+    with tempfile.TemporaryDirectory() as temp:
+        artifacts_root = Path(temp) / "artifacts"
+        finalize_module.Config.ARTIFACTS_DIR = artifacts_root
+        data_dir = Path(temp) / "data"
+        data_dir.mkdir()
+        try:
+            # Without explicit confirmation nothing is promoted at all.
+            try:
+                finalize_module.finalize_run(
+                    "any", data_dir=data_dir, task_definition_confirmed=False
+                )
+                raise AssertionError("unconfirmed task definition must be refused")
+            except ValueError as exc:
+                assert "confirmation" in str(exc)
+
+            # A run that never recorded confirmation is not promotable either.
+            _write_run_metrics(artifacts_root, "unconfirmed", {
+                "task_definition_confirmed": False, "converged": True,
+            })
+            try:
+                finalize_module.finalize_run(
+                    "unconfirmed", data_dir=data_dir, task_definition_confirmed=True
+                )
+                raise AssertionError("run without recorded confirmation must be refused")
+            except ValueError as exc:
+                assert "did not record task-definition confirmation" in str(exc)
+
+            # Not converged, and no explicit budget-stop allowance.
+            _write_run_metrics(artifacts_root, "unconverged", {
+                "task_definition_confirmed": True,
+                "converged": False,
+                "stop_reason": "max_iterations",
+            })
+            try:
+                finalize_module.finalize_run(
+                    "unconverged", data_dir=data_dir, task_definition_confirmed=True
+                )
+                raise AssertionError("unconverged run must be refused by default")
+            except ValueError as exc:
+                assert "not converged" in str(exc)
+
+            # A missing run is reported as missing, not as a crash.
+            try:
+                finalize_module.finalize_run(
+                    "no_such_run", data_dir=data_dir, task_definition_confirmed=True
+                )
+                raise AssertionError("missing run must be refused")
+            except FileNotFoundError as exc:
+                assert "run metrics not found" in str(exc)
+        finally:
+            finalize_module.Config.ARTIFACTS_DIR = original_artifacts
+
+
 def main() -> None:
     original_scorer = agent_tools_module.score_validation_predictions
     agent_tools_module.score_validation_predictions = _fake_trusted_scorer

@@ -151,6 +151,14 @@ def finalize_run(
         shutil.copy2(temporary_submission, final_dir / "submission.csv")
 
     shutil.copy2(candidate, final_dir / "model.py")
+
+    # Per-run evidence is local-only; only the promoted run ships. Copy its whole
+    # directory in, so the hypothesis / diff / metrics / recovery logs the brief
+    # asks for travel with the submission they belong to.
+    final_run_dir = final_dir / "run"
+    if final_run_dir.exists():
+        shutil.rmtree(final_run_dir)
+    shutil.copytree(run_dir, final_run_dir)
     requirements_lock = environment_evidence.get("requirements_lock")
     final_requirements_lock: Path | None = None
     if requirements_lock:
@@ -165,6 +173,7 @@ def finalize_run(
     submission_hash = _sha256(final_dir / "submission.csv")
     final_metrics = {
         "source_run_id": run_id,
+        "run_evidence_dir": str(final_run_dir),
         "source_trial": run_metrics.get("best_trial"),
         "source_model_sha256": source_hash,
         "submission_sha256": submission_hash,
@@ -204,6 +213,7 @@ def finalize_run(
 - GPU-hours: `{run_metrics.get('gpu_hours', 0.0)}`
 - Python environment: `{python_exe}`
 - Resolved dependency lock: `{final_requirements_lock or 'not recorded by legacy run'}`
+- Per-iteration run logs: `{final_run_dir}`
 
 | Validation metric | Official baseline | Final candidate | Delta |
 |---|---:|---:|---:|
