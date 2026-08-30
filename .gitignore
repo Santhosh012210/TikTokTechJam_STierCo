@@ -19,7 +19,9 @@ venv/
 temp/
 # Per-run evidence stays local. The run promoted to the final submission is
 # copied into artifacts/final/run/ by the finalizer, which is what ships.
-artifacts/runs/
+# The README stays tracked so the evidence layout is documented in the repo.
+artifacts/runs/*
+!artifacts/runs/README.md
 src/test_run*
 experiment_workspace/
 
