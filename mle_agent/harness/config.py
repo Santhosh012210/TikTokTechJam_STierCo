@@ -76,6 +76,18 @@ class Config:
     AGENT_MAX_OUTPUT_TOKENS:      int   = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "2048"))
     AGENT_REFLECTION_MAX_TOKENS:  int   = int(os.environ.get("AGENT_REFLECTION_MAX_TOKENS", "768"))
     AGENT_READ_MAX_CHARS:         int   = int(os.environ.get("AGENT_READ_MAX_CHARS", "6000"))
+    AGENT_BOOTSTRAP_MAX_TURNS:    int   = int(
+        os.environ.get("AGENT_BOOTSTRAP_MAX_TURNS", "24")
+    )
+    AGENT_MAX_TURNS:              int   = int(
+        os.environ.get("AGENT_MAX_TURNS", "16")
+    )
+    AGENT_MAX_QUOTA_RESUMES:      int   = int(
+        os.environ.get("AGENT_MAX_QUOTA_RESUMES", "3")
+    )
+    AGENT_MAX_QUOTA_WAIT_S:       float = float(
+        os.environ.get("AGENT_MAX_QUOTA_WAIT_S", "300")
+    )
     AGENT_EXPERIMENT_MEMORY_LIMIT: int  = int(
         os.environ.get("AGENT_EXPERIMENT_MEMORY_LIMIT", "8")
     )

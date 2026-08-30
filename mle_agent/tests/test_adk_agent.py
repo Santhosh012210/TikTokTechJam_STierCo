@@ -148,7 +148,7 @@ def test_google_adk_owns_the_persistent_tool_loop() -> None:
         )
 
         result = agent.run_iteration(
-            1, trial, parent_primary=0.6016, best_primary=0.6016, max_turns=2
+            1, trial, parent_primary=0.6016, best_primary=0.6016, max_turns=3
         )
 
         assert result.success
@@ -211,6 +211,18 @@ def test_bootstrap_budget_ends_without_adk_limit_exception() -> None:
         assert model.calls == 1
         assert "exhausted 1 bootstrap model calls" in result.error
         assert "LlmCallsLimitExceededError" not in result.error
+        budget_events = [
+            event for event in result.recovery_events
+            if event["type"] == "model_call_budget_exhausted"
+        ]
+        assert budget_events == [{
+            "type": "model_call_budget_exhausted",
+            "phase": "bootstrap",
+            "configured_limit": 1,
+            "consumed_calls": 1,
+            "action": "stop_bootstrap",
+            "human_intervention": False,
+        }]
 
 
 def test_task_context_tool_requires_validation_split_key() -> None:
@@ -349,7 +361,7 @@ def test_quota_approval_is_asked_once_then_all_resumes_are_automatic() -> None:
     )
 
     result = agent._run_invocation(
-        "Do work.", phase_kind="quota_test", max_llm_calls=0, progress=lambda: ""
+        "Do work.", phase_kind="quota_test", max_llm_calls=3, progress=lambda: ""
     )
 
     assert result.error is None
@@ -387,7 +399,7 @@ def test_quota_decline_stops_without_waiting() -> None:
     )
 
     result = agent._run_invocation(
-        "Do work.", phase_kind="quota_test", max_llm_calls=0, progress=lambda: ""
+        "Do work.", phase_kind="quota_test", max_llm_calls=3, progress=lambda: ""
     )
 
     assert result.error is not None
@@ -397,6 +409,51 @@ def test_quota_decline_stops_without_waiting() -> None:
     assert sleeps == []
     assert result.recovery_events[0]["action"] == "user_declined_resume"
     assert result.recovery_events[0]["human_intervention"] is True
+
+
+def test_quota_auto_resume_is_bounded_even_after_user_approval() -> None:
+    answers: list[str] = []
+    sleeps: list[float] = []
+    config = Config()
+    config.AGENT_MAX_QUOTA_RESUMES = 1
+    model = _QuotaThenSuccessModel(model="fake-quota-bounded-adk")
+    agent = ResearchAgent(
+        config,
+        model=model,
+        bootstrap_state=BootstrapState(required=False),
+        quota_input=lambda prompt: answers.append(prompt) or "y",
+        quota_sleep=sleeps.append,
+    )
+
+    result = agent._run_invocation(
+        "Do work.", phase_kind="quota_test", max_llm_calls=3, progress=lambda: ""
+    )
+
+    assert result.error == "provider quota remained unavailable after 1 automatic resumes"
+    assert model.calls == 2
+    assert len(answers) == 1
+    assert sleeps == [1.0]
+    assert result.recovery_events[-1]["action"] == "quota_resume_limit_exhausted"
+    assert result.recovery_events[-1]["configured_limit"] == 1
+    assert agent._provider_retry_delay("Please retry in 2h") == 300.0
+
+
+def test_zero_model_call_budget_is_rejected() -> None:
+    agent = ResearchAgent(
+        Config(),
+        model=_QuotaThenSuccessModel(model="fake-zero-budget-adk"),
+        bootstrap_state=BootstrapState(required=False),
+    )
+
+    try:
+        agent._run_invocation(
+            "Do work.", phase_kind="budget_test", max_llm_calls=0,
+            progress=lambda: "",
+        )
+    except ValueError as exc:
+        assert "must be positive" in str(exc)
+    else:
+        raise AssertionError("zero model-call budget was accepted as unlimited")
 
 
 def test_adk_configuration_prefers_native_names_and_keeps_gemini_compatibility() -> None:

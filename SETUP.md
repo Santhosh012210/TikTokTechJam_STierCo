@@ -95,20 +95,25 @@ task documentation. If it does not match, the bootstrap stops before experiment 
 # single-agent dev run: one persistent Google ADK session owns the complete MLE loop
 ./mle_agent/scripts/run_agent.sh
 
-# one-experiment smoke run: uncapped ADK calls, 30-minute outer wall budget
+# one-experiment smoke run: 24 bootstrap calls, 16 experiment calls, 30-minute wall budget
 ./mle_agent/scripts/run_agent_once.sh
 
 # full run, only after a dev run succeeds
 TASK_DEFINITION_CONFIRMED=1 ./mle_agent/scripts/run_official.sh
 ```
 
-The ADK agent defaults to at most 2,048 output tokens per model call, but does not cap the
-number of calls. Override the output size with
+The ADK agent defaults to at most 2,048 output tokens per model call, 24 bootstrap calls,
+and 16 calls per experiment. Override the output size with
 `AGENT_MAX_OUTPUT_TOKENS`; use `AGENT_READ_MAX_CHARS` to change the constrained file page
 size. Each ADK invocation receives one SDK-managed HTTP retry with exponential backoff
 bounded by `PROVIDER_RETRY_DELAY_S` and `RATE_LIMIT_RETRY_DELAY_S`.
-`AGENT_BOOTSTRAP_MAX_TURNS` and `AGENT_MAX_TURNS` default to `0`, meaning unlimited;
-positive values remain available as optional diagnostic caps.
+`AGENT_BOOTSTRAP_MAX_TURNS` and `AGENT_MAX_TURNS` can tune the phase budgets but must be
+positive. Budget exhaustion is logged and ends the phase without discarding completed tool work,
+candidate executions, or metrics. `AGENT_MAX_QUOTA_RESUMES` defaults to `3`, preventing an
+approved automatic quota-recovery loop from retrying forever if the provider remains unavailable.
+Each pause is capped at 300 seconds by `AGENT_MAX_QUOTA_WAIT_S`, even if the provider advertises a
+much longer reset interval. Exhausting this bounded recovery stops the run with
+`provider_unavailable`.
 
 If the provider returns a quota/rate-limit error, the terminal asks: `You have hit your
 LLM limit. Would you like to resume when the limit has reset? [y/n]:`. After `y`, the

@@ -2,7 +2,7 @@
 
 Usage:
     python -m mle_agent.harness.agent_main --max-iter 3 --wall-hours 0.5 \
-        --bootstrap-turns 0 --agent-turns 0
+        --bootstrap-turns 24 --agent-turns 16
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mle_agent.harness.adk_config import configure_google_adk_environment
-from mle_agent.harness.config import load_config
+from mle_agent.harness.config import Config, load_config
 from mle_agent.harness.console import console
 from mle_agent.harness.data_view import prepare_train_valid_view
 from mle_agent.harness.logger import RunLogger
@@ -121,12 +121,18 @@ def main() -> None:
     parser.add_argument("--max-iter", type=int, default=3)
     parser.add_argument("--wall-hours", type=float, default=0.5)
     parser.add_argument(
-        "--agent-turns", type=int, default=0,
-        help="Optional model-call cap per experiment; 0 means unlimited (default).",
+        "--agent-turns", type=int, default=Config.AGENT_MAX_TURNS,
+        help=(
+            "Positive model-call cap per experiment "
+            f"(default: {Config.AGENT_MAX_TURNS})."
+        ),
     )
     parser.add_argument(
-        "--bootstrap-turns", type=int, default=0,
-        help="Optional bootstrap model-call cap; 0 means unlimited (default).",
+        "--bootstrap-turns", type=int, default=Config.AGENT_BOOTSTRAP_MAX_TURNS,
+        help=(
+            "Positive bootstrap model-call cap "
+            f"(default: {Config.AGENT_BOOTSTRAP_MAX_TURNS})."
+        ),
     )
     parser.add_argument("--data-dir", type=str, default=None)
     parser.add_argument(
@@ -141,6 +147,12 @@ def main() -> None:
         help="Record that the checked-in Starter Kit label and metrics were confirmed.",
     )
     args = parser.parse_args()
+    if args.agent_turns <= 0:
+        parser.error("--agent-turns must be positive; unlimited agent loops are disabled")
+    if args.bootstrap_turns <= 0:
+        parser.error(
+            "--bootstrap-turns must be positive; unlimited bootstrap loops are disabled"
+        )
     started = time.time()
 
     config = load_config()
@@ -175,8 +187,8 @@ def main() -> None:
     )
     split_manifest = prepare_train_valid_view(source_data_dir, workspace / "candidate_data")
     config.DATA_DIR = workspace / "candidate_data"
-    experiment_calls = args.agent_turns if args.agent_turns > 0 else "unlimited"
-    bootstrap_calls = args.bootstrap_turns if args.bootstrap_turns > 0 else "unlimited"
+    experiment_calls = args.agent_turns
+    bootstrap_calls = args.bootstrap_turns
 
     console.harness(
         "Run setup",
@@ -251,6 +263,14 @@ def main() -> None:
             "stop_reason": "bootstrap_failed",
             "converged": False,
             "error": failed_bootstrap.error,
+            "run_config": {
+                "max_iterations": args.max_iter,
+                "wall_hours": args.wall_hours,
+                "bootstrap_model_calls": args.bootstrap_turns,
+                "experiment_model_calls": args.agent_turns,
+                "max_quota_resumes_per_invocation": config.AGENT_MAX_QUOTA_RESUMES,
+                "max_quota_wait_seconds": config.AGENT_MAX_QUOTA_WAIT_S,
+            },
             "attempted_agent_experiments": 0,
             "successful_agent_experiments": 0,
             "failed_agent_experiments": 0,
@@ -398,10 +418,15 @@ The candidate loop did not start because the autonomous bootstrap failed. See
         else:
             failed_agent_experiments += 1
             console.harness("Experiment failed", error=result.error)
-            if any(
+            user_declined = any(
                 event.get("action") == "user_declined_resume"
                 for event in result.recovery_events
-            ):
+            )
+            quota_resume_exhausted = any(
+                event.get("action") == "quota_resume_limit_exhausted"
+                for event in result.recovery_events
+            )
+            if user_declined or quota_resume_exhausted:
                 trajectory.append({
                     "iteration": iteration,
                     "status": status,
@@ -411,9 +436,13 @@ The candidate loop did not start because the autonomous bootstrap failed. See
                 })
                 console.harness(
                     "Run stopped",
-                    reason="User declined automatic provider-quota recovery",
+                    reason=(
+                        "User declined automatic provider-quota recovery"
+                        if user_declined
+                        else "Provider remained unavailable after bounded quota recovery"
+                    ),
                 )
-                stop_reason = "user_stopped"
+                stop_reason = "user_stopped" if user_declined else "provider_unavailable"
                 break
 
         trajectory.append({
@@ -454,6 +483,8 @@ The candidate loop did not start because the autonomous bootstrap failed. See
             "wall_hours": args.wall_hours,
             "bootstrap_model_calls": args.bootstrap_turns,
             "experiment_model_calls": args.agent_turns,
+            "max_quota_resumes_per_invocation": config.AGENT_MAX_QUOTA_RESUMES,
+            "max_quota_wait_seconds": config.AGENT_MAX_QUOTA_WAIT_S,
         },
         "convergence": {
             "epsilon": config.CONVERGENCE_EPSILON,
@@ -536,6 +567,8 @@ The candidate loop did not start because the autonomous bootstrap failed. See
 - Tool results: {totals['llm_trace']['tool_result']}
 - Provider errors: {totals['llm_trace']['provider_error']}
 - Quota pauses: {totals['llm_trace']['quota_pause']}
+- Maximum automatic quota resumes per invocation: {config.AGENT_MAX_QUOTA_RESUMES}
+- Maximum wait per quota pause: {config.AGENT_MAX_QUOTA_WAIT_S:.0f}s
 - Detailed LLM trace: `{totals['llm_trace']['path']}`
 - Dedicated run Python: `{final_environment.get('python_executable', 'unavailable')}`
 - Resolved dependency lock: `{final_environment.get('requirements_lock', 'unavailable')}`

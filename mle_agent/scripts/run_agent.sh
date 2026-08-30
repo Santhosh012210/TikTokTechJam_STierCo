@@ -14,6 +14,6 @@ cd "$repo_dir"
 exec "$python_exe" -m mle_agent.harness.agent_main \
   --max-iter "${AGENT_MAX_ITER:-3}" \
   --wall-hours "${AGENT_WALL_HOURS:-0.5}" \
-  --bootstrap-turns "${AGENT_BOOTSTRAP_MAX_TURNS:-0}" \
-  --agent-turns "${AGENT_MAX_TURNS:-0}" \
+  --bootstrap-turns "${AGENT_BOOTSTRAP_MAX_TURNS:-24}" \
+  --agent-turns "${AGENT_MAX_TURNS:-16}" \
   "$@"

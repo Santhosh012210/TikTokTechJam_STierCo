@@ -115,6 +115,10 @@ class ResearchAgent:
         dependency_input: Callable[[str], str] = input,
     ) -> None:
         self.config = config
+        if config.AGENT_MAX_QUOTA_RESUMES < 0:
+            raise ValueError("AGENT_MAX_QUOTA_RESUMES must be non-negative")
+        if config.AGENT_MAX_QUOTA_WAIT_S <= 0:
+            raise ValueError("AGENT_MAX_QUOTA_WAIT_S must be positive")
         if model is None:
             settings = configure_google_adk_environment()
             model = settings.model
@@ -239,8 +243,14 @@ class ResearchAgent:
             match = re.search(pattern, lowered)
             if match:
                 seconds = float(match.group(1)) * multipliers[match.group(2)]
-                return max(1.0, float(math.ceil(seconds)) + 1.0)
-        return max(1.0, self.config.RATE_LIMIT_RETRY_DELAY_S)
+                return min(
+                    self.config.AGENT_MAX_QUOTA_WAIT_S,
+                    max(1.0, float(math.ceil(seconds)) + 1.0),
+                )
+        return min(
+            self.config.AGENT_MAX_QUOTA_WAIT_S,
+            max(1.0, self.config.RATE_LIMIT_RETRY_DELAY_S),
+        )
 
     def _ask_to_resume_after_quota(self) -> bool:
         """Ask once; an approval applies to every later quota pause in this run."""
@@ -346,7 +356,7 @@ class ResearchAgent:
         return self._phase_kind
 
     def _console_phase_for_call(self, number: int) -> str:
-        limit = str(self._max_calls) if self._max_calls > 0 else "∞"
+        limit = str(self._max_calls)
         if self._phase_kind == "bootstrap":
             return f"Bootstrap model call {number}/{limit}"
         if self._phase_kind == "experiment":
@@ -434,7 +444,7 @@ class ResearchAgent:
     def _before_model_callback(
         self, callback_context: Any, llm_request: LlmRequest
     ) -> LlmResponse | None:
-        if self._max_calls > 0 and self._invocation_model_calls >= self._max_calls:
+        if self._invocation_model_calls >= self._max_calls:
             # ADK's max_llm_calls raises when a final tool call lands exactly
             # on the cap and the runtime prepares the next model step. End the
             # invocation before another provider request instead.
@@ -801,6 +811,8 @@ class ResearchAgent:
         max_llm_calls: int,
         progress: Callable[[], str],
     ) -> _InvocationResult:
+        if max_llm_calls <= 0:
+            raise ValueError("max_llm_calls must be positive; unlimited ADK loops are disabled")
         self._phase_kind = phase_kind
         self._max_calls = max_llm_calls
         self._current_phase = phase_kind
@@ -814,11 +826,10 @@ class ResearchAgent:
         self._progress = progress
         error: str | None = None
         recovery_events: list[dict] = []
-        sdk_call_limit = max_llm_calls + 1 if max_llm_calls > 0 else 0
+        sdk_call_limit = max_llm_calls + 1
         run_config = RunConfig(
-            # Zero means unlimited in Google ADK. For an explicitly configured
-            # positive limit, keep one SDK step for the harness's synthetic
-            # non-provider completion response.
+            # Keep one SDK step for the harness's synthetic non-provider
+            # completion response after the final allowed provider call.
             max_llm_calls=sdk_call_limit,
             custom_metadata={"phase": phase_kind, "iteration": self._iteration},
             http_options=types.HttpOptions(
@@ -830,6 +841,7 @@ class ResearchAgent:
             ),
         )
         next_message = prompt
+        quota_resumes = 0
         while True:
             attempt_error: str | None = None
             self._quota_short_circuit = False
@@ -855,9 +867,30 @@ class ResearchAgent:
                 attempt_error = self._pending_quota_error
 
             if attempt_error and self._is_provider_limit_error(attempt_error):
+                if quota_resumes >= self.config.AGENT_MAX_QUOTA_RESUMES:
+                    recovery_events.append({
+                        "type": "provider_quota_pause",
+                        "phase": phase_kind,
+                        "action": "quota_resume_limit_exhausted",
+                        "configured_limit": self.config.AGENT_MAX_QUOTA_RESUMES,
+                        "human_intervention": False,
+                        "error": redact_secrets(attempt_error),
+                    })
+                    console.harness(
+                        "LLM quota recovery stopped",
+                        status="Automatic quota-resume limit reached",
+                        resume_limit=self.config.AGENT_MAX_QUOTA_RESUMES,
+                    )
+                    attempt_error = (
+                        "provider quota remained unavailable after "
+                        f"{quota_resumes} automatic resumes"
+                    )
+                    error = attempt_error
+                    break
                 should_resume, recovery = self._pause_for_provider_limit(attempt_error)
                 recovery_events.append(recovery)
                 if should_resume:
+                    quota_resumes += 1
                     next_message = (
                         "The provider quota has reset. Resume the interrupted task from "
                         "this retained ADK session. Do not repeat completed tool work."
@@ -883,6 +916,8 @@ class ResearchAgent:
         self, candidate_dir: Path, max_turns: int
     ) -> AgentBootstrapResult:
         """Use one ADK session to understand the task and reproduce the baseline."""
+        if max_turns <= 0:
+            raise ValueError("bootstrap model-call budget must be positive")
         started = time.time()
         if self.bootstrap_state.complete:
             return AgentBootstrapResult(
@@ -900,30 +935,40 @@ class ResearchAgent:
             self.bootstrap_state,
             dependency_approver=self._approve_dependency_install,
         )
-        call_budget_label = max_turns if max_turns > 0 else "unlimited"
         bootstrap_prompt = render_prompt(
-            "bootstrap.md", candidate_dir=candidate_dir, max_turns=call_budget_label
+            "bootstrap.md", candidate_dir=candidate_dir, max_turns=max_turns
         )
         self._prompt_records[bootstrap_prompt.name] = bootstrap_prompt
         recovery_events: list[dict] = []
         totals = {"input": 0, "output": 0}
-        unlimited = max_turns <= 0
         remaining = max_turns
         prompt = bootstrap_prompt.content
         last_error: str | None = None
         self._runtime = runtime
         try:
-            while (unlimited or remaining > 0) and not self.bootstrap_state.complete:
+            while remaining > 0 and not self.bootstrap_state.complete:
                 invocation = self._run_invocation(
                     prompt,
                     phase_kind="bootstrap",
-                    max_llm_calls=0 if unlimited else remaining,
+                    max_llm_calls=remaining,
                     progress=self._bootstrap_progress,
                 )
                 self._add_tokens(totals, invocation.token_counts)
                 recovery_events.extend(invocation.recovery_events)
-                if not unlimited:
-                    remaining -= invocation.model_calls
+                remaining -= invocation.model_calls
+                if invocation.budget_exhausted or remaining <= 0:
+                    recovery_events.append({
+                        "type": "model_call_budget_exhausted",
+                        "phase": "bootstrap",
+                        "configured_limit": max_turns,
+                        "consumed_calls": max_turns - remaining,
+                        "action": (
+                            "phase_completed_at_budget"
+                            if self.bootstrap_state.complete
+                            else "stop_bootstrap"
+                        ),
+                        "human_intervention": False,
+                    })
                 if invocation.error:
                     last_error = invocation.error
                     break
@@ -948,16 +993,10 @@ class ResearchAgent:
             self._runtime = None
 
         if not self.bootstrap_state.complete and last_error is None:
-            if unlimited:
-                last_error = (
-                    "ADK agent stopped without completing bootstrap; missing: "
-                    + ", ".join(self.bootstrap_state.missing_requirements())
-                )
-            else:
-                last_error = (
-                    f"ADK agent exhausted {max_turns} bootstrap model calls; missing: "
-                    + ", ".join(self.bootstrap_state.missing_requirements())
-                )
+            last_error = (
+                f"ADK agent exhausted {max_turns} bootstrap model calls; missing: "
+                + ", ".join(self.bootstrap_state.missing_requirements())
+            )
         return AgentBootstrapResult(
             success=self.bootstrap_state.complete,
             metrics=self.bootstrap_state.baseline_metrics,
@@ -976,6 +1015,8 @@ class ResearchAgent:
         max_turns: int,
     ) -> AgentIterationResult:
         """Run one experiment through ADK's native model/tool event loop."""
+        if max_turns <= 0:
+            raise ValueError("experiment model-call budget must be positive")
         started = time.time()
         model_path = candidate_dir / "model.py"
         if not self.bootstrap_state.complete:
@@ -1002,14 +1043,13 @@ class ResearchAgent:
             self.bootstrap_state,
             dependency_approver=self._approve_dependency_install,
         )
-        call_budget_label = max_turns if max_turns > 0 else "unlimited"
         iteration_prompt = render_prompt(
             "iteration.md",
             iteration=iteration,
             candidate_dir=candidate_dir,
             parent_primary=f"{parent_primary:.6f}",
             best_primary=f"{best_primary:.6f}",
-            max_turns=call_budget_label,
+            max_turns=max_turns,
             experiment_ledger=json.dumps(
                 self._experiment_memory[-self.config.AGENT_EXPERIMENT_MEMORY_LIMIT:],
                 ensure_ascii=False,
@@ -1024,11 +1064,7 @@ class ResearchAgent:
         self._iteration = iteration
         recovery_events: list[dict] = []
         totals = {"input": 0, "output": 0}
-        unlimited = max_turns <= 0
-        # Positive values remain supported as an explicit override. The
-        # default zero delegates termination to the agent/provider and the
-        # outer experiment and wall-clock budgets.
-        remaining = max_turns + 1 if not unlimited else 0
+        remaining = max_turns
         prompt = iteration_prompt.content
         final_text = ""
         last_error: str | None = None
@@ -1041,17 +1077,25 @@ class ResearchAgent:
 
         self._runtime = runtime
         try:
-            while unlimited or remaining > 0:
+            while remaining > 0:
                 invocation = self._run_invocation(
                     prompt,
                     phase_kind="experiment",
-                    max_llm_calls=0 if unlimited else remaining,
+                    max_llm_calls=remaining,
                     progress=progress,
                 )
                 self._add_tokens(totals, invocation.token_counts)
                 recovery_events.extend(invocation.recovery_events)
-                if not unlimited:
-                    remaining -= invocation.model_calls
+                remaining -= invocation.model_calls
+                if invocation.budget_exhausted or remaining <= 0:
+                    recovery_events.append({
+                        "type": "model_call_budget_exhausted",
+                        "phase": f"experiment_{iteration}",
+                        "configured_limit": max_turns,
+                        "consumed_calls": max_turns - remaining,
+                        "action": "finish_with_recorded_state",
+                        "human_intervention": False,
+                    })
                 if invocation.text:
                     final_text = invocation.text
                 if invocation.error:
@@ -1063,7 +1107,7 @@ class ResearchAgent:
                 )
                 if successful is not None and final_text:
                     break
-                if (not unlimited and remaining <= 0) or invocation.model_calls == 0:
+                if remaining <= 0 or invocation.model_calls == 0:
                     break
                 if not runtime.executions:
                     action = "continue_with_execution_requirement"
@@ -1103,9 +1147,7 @@ class ResearchAgent:
         chosen = best_execution or last_execution
         if chosen is None and last_error is None:
             last_error = (
-                "ADK agent ended without calling run_model"
-                if unlimited
-                else f"ADK agent ended without calling run_model within {max_turns} work calls"
+                f"ADK agent ended without calling run_model within {max_turns} model calls"
             )
         elif chosen is not None and not chosen["success"] and last_error is None:
             last_error = chosen.get("error") or "candidate execution failed"

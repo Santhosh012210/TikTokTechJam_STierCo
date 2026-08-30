@@ -13,8 +13,8 @@ fi
 
 AGENT_MAX_ITER=50 \
 AGENT_WALL_HOURS=6 \
-AGENT_BOOTSTRAP_MAX_TURNS=0 \
-AGENT_MAX_TURNS=0 \
+AGENT_BOOTSTRAP_MAX_TURNS=32 \
+AGENT_MAX_TURNS=24 \
 exec "$repo_dir/mle_agent/scripts/run_agent.sh" \
   --task-definition-confirmed \
   "$@"

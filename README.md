@@ -104,26 +104,29 @@ python baseline_kuairand-starter-kit/baseline.py \
 # single-agent dev run (3 experiments, up to 30 min)
 ./mle_agent/scripts/run_agent.sh
 
-# one-experiment smoke run (unlimited ADK calls, up to 30 min)
+# one-experiment smoke run (24 bootstrap calls, 16 experiment calls, up to 30 min)
 ./mle_agent/scripts/run_agent_once.sh
 
-# optionally impose explicit call caps when diagnosing a runaway prompt/tool loop
+# optionally tune the finite call caps for a larger development run
 AGENT_MAX_ITER=5 AGENT_MAX_TURNS=20 AGENT_BOOTSTRAP_MAX_TURNS=20 ./mle_agent/scripts/run_agent.sh
 
 # official-budget run after smoke verification and metric confirmation
 TASK_DEFINITION_CONFIRMED=1 ./mle_agent/scripts/run_official.sh
 ```
 
-Before experiment 1, the ADK agent completes a separate uncapped bootstrap phase. It discovers the
+Before experiment 1, the ADK agent completes a separately budgeted bootstrap phase. It discovers the
 starter-kit task documentation, reads the complete README, `baseline.py`, `evaluate.py`,
 `data.py`, `ablation_features.py`, and inherited candidate through explicit pages, inspects
 the train/validation-only data view and its available columns, searches the local literature
 corpus, explicitly reproduces the official baseline, and records one structured task summary.
 That summary must record the five baseline fields and the organizer's measured no-gain result
 for all 13 static fields. The harness blocks edits until this bootstrap is complete; the summary and
-baseline result then stay in the same conversation for every later experiment. Model-call
-caps default to zero (unlimited); positive `AGENT_BOOTSTRAP_MAX_TURNS` or
-`AGENT_MAX_TURNS` values are optional diagnostic safeguards.
+baseline result then stay in the same conversation for every later experiment. Bootstrap defaults
+to 24 model calls and each experiment defaults to 16. Both values must remain positive; exhausting a
+cap ends that phase with an explicit evidence event while preserving completed tools and metrics.
+Provider-quota recovery is also bounded to three automatic resumes per invocation after approval.
+Each quota wait is capped at five minutes; exhausting the resume limit stops the run as
+`provider_unavailable` instead of starting another experiment against the same unavailable provider.
 
 Feature engineering reads the filtered `experiment_workspace/<run_id>/candidate_data` through
 `--data_dir`; it never rewrites those CSVs or the organizer starter kit. The agent implements the
