@@ -227,6 +227,15 @@ def test_task_context_tool_requires_validation_split_key() -> None:
     assert split_schema["required"] == ["train", "validation", "test"]
     assert "valid" not in split_schema["properties"]
     assert split_schema["additionalProperties"] is False
+    feature_schema = schema["$defs"]["_FeatureEngineeringContext"]
+    assert feature_schema["required"] == [
+        "baseline_fields",
+        "measured_dead_ends",
+        "promising_feature_families",
+        "leakage_controls",
+        "implementation_boundary",
+    ]
+    assert feature_schema["additionalProperties"] is False
 
 
 def test_successful_context_on_last_call_completes_without_summary_call() -> None:
@@ -240,17 +249,24 @@ def test_successful_context_on_last_call_completes_without_summary_call() -> Non
         readme = starter / "README.md"
         baseline = starter / "baseline.py"
         evaluate = starter / "evaluate.py"
+        data = starter / "data.py"
+        feature_ablation = starter / "ablation_features.py"
         candidate = trial / "model.py"
-        for path in (readme, baseline, evaluate, candidate):
+        for path in (readme, baseline, evaluate, data, feature_ablation, candidate):
             path.write_text("fully read\n", encoding="utf-8")
         config.BASELINE_ROOT = starter
-        paths = [str(path.resolve()) for path in (readme, baseline, evaluate, candidate)]
+        paths = [
+            str(path.resolve())
+            for path in (readme, baseline, evaluate, data, feature_ablation, candidate)
+        ]
         state = BootstrapState(
             discovery_completed=True,
             primary_readme_path=paths[0],
             required_baseline_path=paths[1],
             required_evaluation_path=paths[2],
-            required_candidate_model_path=paths[3],
+            required_data_path=paths[3],
+            required_feature_ablation_path=paths[4],
+            required_candidate_model_path=paths[5],
             fully_read_paths=set(paths),
             data_inspected=True,
             literature_queries=["within-user ranking"],
@@ -271,6 +287,19 @@ def test_successful_context_on_last_call_completes_without_summary_call() -> Non
             "hard_constraints": ["Never access hidden test data."],
             "known_dead_ends": ["Comment-only changes."],
             "promising_directions": ["Ranking objectives."],
+            "feature_engineering_context": {
+                "baseline_fields": [
+                    "user_id", "video_id", "author_id", "tab", "dur_bucket",
+                ],
+                "measured_dead_ends": [
+                    "The organizer's 13 static fields produced no gain."
+                ],
+                "promising_feature_families": ["train-history sequences"],
+                "leakage_controls": ["Fit transformations on train rows only."],
+                "implementation_boundary": (
+                    "Read candidate_data and implement features in model.py."
+                ),
+            },
             "candidate_contract": ["Accept --data_dir and print JSON metrics."],
             "source_paths": paths,
         }

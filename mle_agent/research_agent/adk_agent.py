@@ -83,6 +83,18 @@ class _TaskDataSplits(BaseModel):
     test: str
 
 
+class _FeatureEngineeringContext(BaseModel):
+    """Structured evidence that the agent understood the organizer feature baseline."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    baseline_fields: list[str]
+    measured_dead_ends: list[str]
+    promising_feature_families: list[str]
+    leakage_controls: list[str]
+    implementation_boundary: str
+
+
 class ResearchAgent:
     """One persistent Google ADK agent for the complete research run."""
 
@@ -622,7 +634,7 @@ class ResearchAgent:
             return dispatch("search_ml_literature", {"query": query, "k": k})
 
         def reproduce_baseline(tool_context: ToolContext = None) -> dict[str, Any]:
-            """Run the unchanged inherited baseline and verify its validation score."""
+            """Run the unchanged baseline after all required task and feature sources are read."""
             return dispatch("reproduce_baseline", {})
 
         def record_task_context(
@@ -635,6 +647,7 @@ class ResearchAgent:
             hard_constraints: list[str],
             known_dead_ends: list[str],
             promising_directions: list[str],
+            feature_engineering_context: _FeatureEngineeringContext,
             candidate_contract: list[str],
             source_paths: list[str],
             tool_context: ToolContext = None,
@@ -650,6 +663,7 @@ class ResearchAgent:
                 "hard_constraints": hard_constraints,
                 "known_dead_ends": known_dead_ends,
                 "promising_directions": promising_directions,
+                "feature_engineering_context": feature_engineering_context.model_dump(),
                 "candidate_contract": candidate_contract,
                 "source_paths": source_paths,
             })
@@ -668,6 +682,9 @@ class ResearchAgent:
             expected_effect: str = "",
             falsification_criterion: str = "",
             rollback_plan: str = "retain incumbent",
+            feature_sources: list[str] | None = None,
+            feature_transformations: list[str] | None = None,
+            leakage_controls: list[str] | None = None,
             tool_context: ToolContext = None,
         ) -> dict[str, Any]:
             """Execute model.py against train and validation and return metrics/errors."""
@@ -679,6 +696,9 @@ class ResearchAgent:
                 "expected_effect": expected_effect,
                 "falsification_criterion": falsification_criterion,
                 "rollback_plan": rollback_plan,
+                "feature_sources": feature_sources or [],
+                "feature_transformations": feature_transformations or [],
+                "leakage_controls": leakage_controls or [],
             })
 
         return [
@@ -699,6 +719,11 @@ class ResearchAgent:
             bool(state.primary_readme_path and state.primary_readme_path in state.fully_read_paths),
             bool(state.required_evaluation_path and state.required_evaluation_path in state.fully_read_paths),
             bool(state.required_baseline_path and state.required_baseline_path in state.fully_read_paths),
+            bool(state.required_data_path and state.required_data_path in state.fully_read_paths),
+            bool(
+                state.required_feature_ablation_path
+                and state.required_feature_ablation_path in state.fully_read_paths
+            ),
             bool(state.required_candidate_model_path and state.required_candidate_model_path in state.fully_read_paths),
             state.data_inspected,
             bool(state.literature_queries),

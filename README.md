@@ -115,13 +115,22 @@ TASK_DEFINITION_CONFIRMED=1 ./mle_agent/scripts/run_official.sh
 ```
 
 Before experiment 1, the ADK agent completes a separate uncapped bootstrap phase. It discovers the
-starter-kit task documentation, reads the complete README and required benchmark code
-through explicit pages, inspects the train/validation-only data view, searches the local
-literature corpus, explicitly reproduces the official baseline, and records one structured
-task summary. The harness blocks edits until this bootstrap is complete; the summary and
+starter-kit task documentation, reads the complete README, `baseline.py`, `evaluate.py`,
+`data.py`, `ablation_features.py`, and inherited candidate through explicit pages, inspects
+the train/validation-only data view and its available columns, searches the local literature
+corpus, explicitly reproduces the official baseline, and records one structured task summary.
+That summary must record the five baseline fields and the organizer's measured no-gain result
+for all 13 static fields. The harness blocks edits until this bootstrap is complete; the summary and
 baseline result then stay in the same conversation for every later experiment. Model-call
 caps default to zero (unlimited); positive `AGENT_BOOTSTRAP_MAX_TURNS` or
 `AGENT_MAX_TURNS` values are optional diagnostic safeguards.
+
+Feature engineering reads the filtered `experiment_workspace/<run_id>/candidate_data` through
+`--data_dir`; it never rewrites those CSVs or the organizer starter kit. The agent implements the
+complete feature pipeline in the trial's self-contained `model.py`. Feature-oriented runs must log
+their source columns, exact transformations, and train-only leakage controls before the harness will
+execute them. This supports history/sequence, temporal, auxiliary-signal, watch-time, aggregate,
+and user-item-cross experiments without repeating the measured static-field ablation.
 
 When Gemini returns a real quota/rate-limit response, an interactive run asks once whether
 to resume after reset. Choosing `y` waits for the provider-advertised retry interval and

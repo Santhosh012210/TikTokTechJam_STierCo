@@ -124,6 +124,13 @@ evidence goes to `artifacts/runs/<run_id>/` as `logs/events.jsonl`,
 `logs/llm_events.jsonl`, `results/metrics.json`,
 and `reports/summary.md`. See `artifacts/README.md` for promoting a run to `artifacts/final/`.
 
+Each run also creates `experiment_workspace/<run_id>/candidate_data`, a filtered copy containing
+training and validation rows but no test rows. The bootstrap exposes its CSV column inventory after
+the agent has read the official feature loader and organizer ablation. Raw CSVs remain immutable;
+all feature joins, histories, buckets, crosses, and train-fitted encoders belong in the candidate's
+self-contained `model.py`. Feature experiments are rejected unless they declare their input columns,
+transformations, and leakage controls.
+
 Check a run's log schema:
 
 ```bash

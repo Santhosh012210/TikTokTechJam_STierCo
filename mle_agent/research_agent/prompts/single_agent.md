@@ -48,6 +48,9 @@ chain-of-thought or a long explanation.
 - Train on `splits['train']` only and evaluate on `splits['valid']` only.
 - Never access `splits['test']`, test dates, or test labels during research.
 - Never modify the official starter kit or `evaluate.py`.
+- Treat the copied `candidate_data` CSVs as immutable inputs. Implement feature loading,
+  joins, train-fitted encoders, histories, and transformations in the self-contained candidate
+  `model.py`, so the scored candidate is inherited and finalized as one reproducible file.
 - Use no external training data.
 - Every research experiment must make a substantive Python change to the inherited
   `model.py` before `run_model`. The runtime rejects unchanged, comment-only, and
@@ -71,8 +74,8 @@ Before the first experiment, complete this separate bootstrap phase before editi
 candidate:
 
 1. Call `discover_task_docs` to locate the task README and benchmark-support files.
-2. Read the primary README, official `baseline.py`, official `evaluate.py`, and inherited
-   candidate `model.py`.
+2. Read the primary README, official `baseline.py`, official `evaluate.py`, official `data.py`,
+   organizer `ablation_features.py`, and inherited candidate `model.py`.
    `read_file` is paginated: whenever `complete` is false, call it again with the exact
    `next_offset` until the whole file has been read.
 3. Call `inspect_data` for the enforced train/validation-only EDA.
@@ -82,7 +85,10 @@ candidate:
    Interpret the returned validation metrics and confirm they match the official score.
 6. Call `record_task_context` with the most important objective, label, metrics, fixed
    splits, baseline, evaluation protocol, constraints, dead ends, promising directions,
-   candidate contract, and source paths. Cite only sources you actually read completely.
+   candidate contract, and source paths. Its feature-engineering context must name the five
+   baseline fields, record the organizer's measured no-gain result for all 13 static fields,
+   identify promising feature families and leakage controls, and state that feature code runs
+   from `model.py` over `candidate_data`. Cite only sources you actually read completely.
 
 The harness rejects `write_file` and `run_model` until this checklist is complete. The
 recorded summary is retained in this persistent conversation and must be used alongside
@@ -94,7 +100,11 @@ For every experiment:
 1. Inspect the inherited candidate and relevant evidence.
 2. State one precise hypothesis and why it may improve the fixed ranking metrics.
 3. Implement the hypothesis in the candidate `model.py`; do not merely describe it.
-4. Call `run_model` with the hypothesis, reasoning, and any literature chunk IDs.
+4. Call `run_model` with the hypothesis, reasoning, and any literature chunk IDs. For a feature,
+   sequence/history, temporal, watch-time, or auxiliary-signal experiment, also declare the exact
+   feature sources, transformations, and leakage controls. Fit vocabularies, buckets, aggregates,
+   and target-derived statistics on training rows only; validation labels may be used only by the
+   official evaluator.
 5. If execution fails, diagnose, edit, and rerun within the available turn budget.
 6. After a scored run, respond with a concise JSON object containing `reflection`,
    `hypothesis_supported`, and `suggested_next`.

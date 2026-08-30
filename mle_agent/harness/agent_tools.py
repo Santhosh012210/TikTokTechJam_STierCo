@@ -72,8 +72,8 @@ AGENT_TOOLS = [
     {
         "name": "inspect_data",
         "description": (
-            "Return a deterministic EDA summary made only from the training and validation dates. "
-            "The hidden test dates are never summarized."
+            "Return a deterministic EDA summary and candidate-data column inventory made only "
+            "from the training and validation view. The hidden test dates are never summarized."
         ),
         "parameters": {"type": "object", "properties": {}},
     },
@@ -82,7 +82,8 @@ AGENT_TOOLS = [
         "name": "reproduce_baseline",
         "description": (
             "Execute the unchanged inherited baseline candidate after reading the task README, "
-            "evaluation code, and model.py. Verifies the official validation score before research."
+            "baseline, evaluation, feature/data, feature-ablation, and model code. Verifies the "
+            "official validation score before research."
         ),
         "parameters": {"type": "object", "properties": {}},
     },
@@ -113,6 +114,23 @@ AGENT_TOOLS = [
                 "hard_constraints": {"type": "array", "items": {"type": "string"}},
                 "known_dead_ends": {"type": "array", "items": {"type": "string"}},
                 "promising_directions": {"type": "array", "items": {"type": "string"}},
+                "feature_engineering_context": {
+                    "type": "object",
+                    "properties": {
+                        "baseline_fields": {"type": "array", "items": {"type": "string"}},
+                        "measured_dead_ends": {"type": "array", "items": {"type": "string"}},
+                        "promising_feature_families": {"type": "array", "items": {"type": "string"}},
+                        "leakage_controls": {"type": "array", "items": {"type": "string"}},
+                        "implementation_boundary": {"type": "string"},
+                    },
+                    "required": [
+                        "baseline_fields",
+                        "measured_dead_ends",
+                        "promising_feature_families",
+                        "leakage_controls",
+                        "implementation_boundary",
+                    ],
+                },
                 "candidate_contract": {"type": "array", "items": {"type": "string"}},
                 "source_paths": {"type": "array", "items": {"type": "string"}},
             },
@@ -126,6 +144,7 @@ AGENT_TOOLS = [
                 "hard_constraints",
                 "known_dead_ends",
                 "promising_directions",
+                "feature_engineering_context",
                 "candidate_contract",
                 "source_paths",
             ],
@@ -170,6 +189,21 @@ AGENT_TOOLS = [
                     "type": "string",
                     "description": "How to return to the incumbent if the experiment fails.",
                 },
+                "feature_sources": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Candidate-data columns or train-derived histories used by a feature-oriented experiment.",
+                },
+                "feature_transformations": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Exact joins, buckets, crosses, aggregates, or sequence transformations being tested.",
+                },
+                "leakage_controls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "How every fitted statistic avoids validation labels and future information.",
+                },
             },
             "required": ["hypothesis", "reasoning"],
         },
@@ -187,6 +221,8 @@ class BootstrapState:
     primary_readme_path: str | None = None
     required_evaluation_path: str | None = None
     required_baseline_path: str | None = None
+    required_data_path: str | None = None
+    required_feature_ablation_path: str | None = None
     required_candidate_model_path: str | None = None
     read_coverage: dict[str, list[tuple[int, int]]] = field(default_factory=dict)
     fully_read_paths: set[str] = field(default_factory=set)
@@ -221,6 +257,14 @@ class BootstrapState:
             missing.append("identify the official baseline implementation")
         elif self.required_baseline_path not in self.fully_read_paths:
             missing.append("fully read the official baseline implementation")
+        if not self.required_data_path:
+            missing.append("identify the official feature/data implementation")
+        elif self.required_data_path not in self.fully_read_paths:
+            missing.append("fully read the official feature/data implementation")
+        if not self.required_feature_ablation_path:
+            missing.append("identify the organizer feature ablation")
+        elif self.required_feature_ablation_path not in self.fully_read_paths:
+            missing.append("fully read the organizer feature ablation")
         if not self.required_candidate_model_path:
             missing.append("identify the inherited candidate model.py")
         elif self.required_candidate_model_path not in self.fully_read_paths:
@@ -246,6 +290,8 @@ class BootstrapState:
             (self.primary_readme_path, "fully read the primary task README"),
             (self.required_evaluation_path, "fully read the official evaluation code"),
             (self.required_baseline_path, "fully read the official baseline implementation"),
+            (self.required_data_path, "fully read the official feature/data implementation"),
+            (self.required_feature_ablation_path, "fully read the organizer feature ablation"),
             (self.required_candidate_model_path, "fully read the inherited candidate model.py"),
         )
         for path, label in required_reads:
@@ -276,6 +322,8 @@ class BootstrapState:
             "primary_readme_path": self.primary_readme_path,
             "required_evaluation_path": self.required_evaluation_path,
             "required_baseline_path": self.required_baseline_path,
+            "required_data_path": self.required_data_path,
+            "required_feature_ablation_path": self.required_feature_ablation_path,
             "required_candidate_model_path": self.required_candidate_model_path,
             "fully_read_paths": sorted(self.fully_read_paths),
             "read_coverage": {
@@ -330,7 +378,13 @@ def _discover_task_documents(starter_kit_root: Path) -> tuple[list[dict[str, obj
             str(path).lower(),
         ),
     )
-    support_names = ("baseline.py", "evaluate.py", "data.py", "baseline_scores.json")
+    support_names = (
+        "baseline.py",
+        "evaluate.py",
+        "data.py",
+        "ablation_features.py",
+        "baseline_scores.json",
+    )
     support = [starter_kit_root / name for name in support_names if (starter_kit_root / name).is_file()]
     ordered = readmes + [path for path in support if path not in readmes]
     documents: list[dict[str, object]] = []
@@ -444,14 +498,41 @@ def execute_model(candidate_dir: Path, config: Config, timeout_seconds: int = 30
     )
 
 
-_EDA_CACHE: dict[str, object] | None = None
+_EDA_CACHE: dict[str, dict[str, object]] = {}
+
+
+def _candidate_data_inventory(data_dir: Path) -> dict[str, object]:
+    """Describe usable columns without returning raw rows or hidden-split information."""
+    roles = {
+        "log_standard_4_08_to_4_21_pure.csv": "training interactions",
+        "log_standard_4_22_to_5_08_pure.csv": "validation interactions only in this filtered view",
+        "user_features_pure.csv": "static user-side features keyed by user_id",
+        "video_features_basic_pure.csv": "static item metadata keyed by video_id",
+        "video_features_statistic_pure.csv": "organizer-provided item statistics keyed by video_id",
+    }
+    files: dict[str, object] = {}
+    for name, role in roles.items():
+        path = data_dir / name
+        with path.open(encoding="utf-8", newline="") as handle:
+            columns = csv.DictReader(handle).fieldnames or []
+        files[name] = {"role": role, "columns": columns}
+    return {
+        "root": str(data_dir.resolve()),
+        "raw_files_are_immutable_inputs": True,
+        "baseline_fields": ["user_id", "video_id", "author_id", "tab", "dur_bucket"],
+        "files": files,
+        "implementation_boundary": (
+            "Read these CSVs through --data_dir, but implement all feature joins, train-fitted "
+            "encoders, histories, and transformations in the self-contained candidate model.py."
+        ),
+    }
 
 
 def inspect_train_valid_data(config: Config) -> dict[str, object]:
     """Summarize only dates through the end of validation (2022-04-28)."""
-    global _EDA_CACHE
-    if _EDA_CACHE is not None:
-        return _EDA_CACHE
+    cache_key = str(config.DATA_DIR.resolve())
+    if cache_key in _EDA_CACHE:
+        return _EDA_CACHE[cache_key]
 
     split_stats = {
         "train": {"rows": 0, "positives": 0, "users": Counter()},
@@ -499,7 +580,8 @@ def inspect_train_valid_data(config: Config) -> dict[str, object]:
         field: round(auxiliary[field] / auxiliary_total, 6) if auxiliary_total else 0.0
         for field in aux_fields
     }
-    _EDA_CACHE = summary
+    summary["candidate_data"] = _candidate_data_inventory(config.DATA_DIR)
+    _EDA_CACHE[cache_key] = summary
     return summary
 
 
@@ -551,6 +633,16 @@ class AgentToolRuntime:
             self.bootstrap_state.required_baseline_path = (
                 str(baseline_path) if baseline_path.is_file() else None
             )
+            data_path = (self.config.BASELINE_ROOT / "data.py").resolve()
+            self.bootstrap_state.required_data_path = (
+                str(data_path) if data_path.is_file() else None
+            )
+            feature_ablation_path = (
+                self.config.BASELINE_ROOT / "ablation_features.py"
+            ).resolve()
+            self.bootstrap_state.required_feature_ablation_path = (
+                str(feature_ablation_path) if feature_ablation_path.is_file() else None
+            )
             return json.dumps({
                 "starter_kit_root": str(self.config.BASELINE_ROOT.resolve()),
                 "primary_readme_path": self.bootstrap_state.primary_readme_path,
@@ -558,13 +650,15 @@ class AgentToolRuntime:
                     path for path in [
                         self.bootstrap_state.required_baseline_path,
                         self.bootstrap_state.required_evaluation_path,
+                        self.bootstrap_state.required_data_path,
+                        self.bootstrap_state.required_feature_ablation_path,
                     ]
                     if path is not None
                 ],
                 "documents": documents,
                 "instruction": (
-                    "Read the primary README, official baseline and evaluation code, and "
-                    "inherited model.py until every read response reports complete=true."
+                    "Read the primary README, official baseline, evaluation code, data.py, "
+                    "feature ablation, and inherited model.py until every response is complete."
                 ),
             }, ensure_ascii=False, indent=2)
         if name == "read_file":
@@ -715,6 +809,47 @@ class AgentToolRuntime:
             ):
                 invalid_fields.append("data_splits")
 
+            feature_context = payload.get("feature_engineering_context")
+            feature_context_errors: list[str] = []
+            if not isinstance(feature_context, dict):
+                invalid_fields.append("feature_engineering_context")
+            else:
+                expected_fields = [
+                    "user_id", "video_id", "author_id", "tab", "dur_bucket",
+                ]
+                if feature_context.get("baseline_fields") != expected_fields:
+                    feature_context_errors.append(
+                        "baseline_fields must match the five fields defined by official data.py"
+                    )
+                for name in (
+                    "measured_dead_ends",
+                    "promising_feature_families",
+                    "leakage_controls",
+                ):
+                    value = feature_context.get(name)
+                    if not isinstance(value, list) or not value or not all(
+                        isinstance(item, str) and item.strip() for item in value
+                    ):
+                        feature_context_errors.append(f"{name} must be a non-empty string list")
+                dead_end_text = " ".join(
+                    str(item) for item in feature_context.get("measured_dead_ends", [])
+                ).lower()
+                if not (
+                    "13" in dead_end_text
+                    and "static" in dead_end_text
+                    and any(term in dead_end_text for term in (
+                        "no gain", "did not help", "didn't help", "lower", "0.594",
+                    ))
+                ):
+                    feature_context_errors.append(
+                        "measured_dead_ends must record that the organizer's 13 static fields did not improve the baseline"
+                    )
+                boundary = str(feature_context.get("implementation_boundary", "")).lower()
+                if "candidate_data" not in boundary or "model.py" not in boundary:
+                    feature_context_errors.append(
+                        "implementation_boundary must place feature code in model.py over candidate_data"
+                    )
+
             resolved_sources: set[str] = set()
             source_errors: list[str] = []
             for source in payload.get("source_paths", []):
@@ -729,6 +864,8 @@ class AgentToolRuntime:
                     self.bootstrap_state.primary_readme_path,
                     self.bootstrap_state.required_evaluation_path,
                     self.bootstrap_state.required_baseline_path,
+                    self.bootstrap_state.required_data_path,
+                    self.bootstrap_state.required_feature_ablation_path,
                     self.bootstrap_state.required_candidate_model_path,
                 )
                 if path is not None
@@ -737,11 +874,18 @@ class AgentToolRuntime:
             unread_cited_sources = sorted(
                 resolved_sources - self.bootstrap_state.fully_read_paths
             )
-            if invalid_fields or source_errors or uncited_sources or unread_cited_sources:
+            if (
+                invalid_fields
+                or feature_context_errors
+                or source_errors
+                or uncited_sources
+                or unread_cited_sources
+            ):
                 record = {
                     "action": "record_task_context",
                     "error": "TASK_CONTEXT_INVALID",
                     "invalid_or_empty_fields": sorted(set(invalid_fields)),
+                    "feature_context_errors": feature_context_errors,
                     "source_errors": source_errors,
                     "required_sources_not_cited": uncited_sources,
                     "cited_sources_not_fully_read": unread_cited_sources,
@@ -773,6 +917,11 @@ class AgentToolRuntime:
                     payload.get("falsification_criterion", "")
                 ),
                 "rollback_plan": str(payload.get("rollback_plan", "retain incumbent")),
+                "feature_sources": list(payload.get("feature_sources") or []),
+                "feature_transformations": list(
+                    payload.get("feature_transformations") or []
+                ),
+                "leakage_controls": list(payload.get("leakage_controls") or []),
             }
             if self.model_post_save_failed:
                 error = (
@@ -824,6 +973,42 @@ class AgentToolRuntime:
                     "error": (
                         "REJECTED: this semantic candidate was already scored successfully "
                         "in the current autonomous run. Test a distinct change."
+                    ),
+                    "wall_seconds": 0.0,
+                    "candidate_changed": True,
+                }
+                self.executions.append(record)
+                return json.dumps(record, ensure_ascii=False, indent=2)
+
+            feature_components = {
+                "feature",
+                "features",
+                "sequence",
+                "history",
+                "time",
+                "temporal",
+                "watch-time",
+                "auxiliary-task",
+            }
+            target_component = proposal["target_component"].strip().lower()
+            if target_component in feature_components and any(
+                not proposal[field_name]
+                for field_name in (
+                    "feature_sources",
+                    "feature_transformations",
+                    "leakage_controls",
+                )
+            ):
+                record = {
+                    "hypothesis": str(payload.get("hypothesis", "")),
+                    "reasoning": str(payload.get("reasoning", "")),
+                    "literature_chunk_ids": list(payload.get("literature_chunk_ids", [])),
+                    "proposal": proposal,
+                    "success": False,
+                    "metrics": None,
+                    "error": (
+                        "FEATURE_EVIDENCE_REQUIRED: feature-oriented experiments must declare "
+                        "feature_sources, feature_transformations, and leakage_controls before execution"
                     ),
                     "wall_seconds": 0.0,
                     "candidate_changed": True,

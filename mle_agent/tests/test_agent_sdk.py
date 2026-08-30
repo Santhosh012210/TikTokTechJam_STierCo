@@ -11,7 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from mle_agent.harness.agent_main import _converged, _log_row
 import mle_agent.harness.agent_tools as agent_tools_module
-from mle_agent.harness.agent_tools import AgentToolRuntime, BootstrapState, execute_model
+from mle_agent.harness.agent_tools import (
+    AgentToolRuntime,
+    BootstrapState,
+    execute_model,
+    inspect_train_valid_data,
+)
 from mle_agent.harness.config import load_config
 from mle_agent.harness.console import RunConsole
 from mle_agent.harness.data_view import (
@@ -337,6 +342,23 @@ def _task_context_payload(source_paths: list[str]) -> dict:
         "hard_constraints": ["Never access the hidden test split."],
         "known_dead_ends": ["Comment-only edits."],
         "promising_directions": ["Evidence-backed ranking objectives."],
+        "feature_engineering_context": {
+            "baseline_fields": [
+                "user_id", "video_id", "author_id", "tab", "dur_bucket",
+            ],
+            "measured_dead_ends": [
+                "The organizer's 13 static fields produced no gain over the five-field baseline."
+            ],
+            "promising_feature_families": [
+                "train-history sequences", "temporal context", "user-item crosses",
+            ],
+            "leakage_controls": [
+                "Fit every vocabulary, bucket, aggregate, and target statistic on train only."
+            ],
+            "implementation_boundary": (
+                "Read immutable candidate_data and implement the complete feature pipeline in model.py."
+            ),
+        },
         "candidate_contract": ["Accept --data_dir and print JSON metrics."],
         "source_paths": source_paths,
     }
@@ -404,6 +426,9 @@ def test_task_docs_are_discovered_and_long_reads_are_explicitly_paginated():
         starter.joinpath("README.md").write_text(readme_text, encoding="utf-8")
         starter.joinpath("evaluate.py").write_text("metric = 'primary'\n", encoding="utf-8")
         starter.joinpath("data.py").write_text("SPLITS = {}\n", encoding="utf-8")
+        starter.joinpath("ablation_features.py").write_text(
+            "RESULT = '13 static fields: no gain'\n", encoding="utf-8"
+        )
         root.joinpath("README-outside.md").write_text("not discoverable", encoding="utf-8")
         trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
         config.BASELINE_ROOT = starter
@@ -413,7 +438,9 @@ def test_task_docs_are_discovered_and_long_reads_are_explicitly_paginated():
         discovery = json.loads(runtime.dispatch("discover_task_docs", {}))
         assert discovery["primary_readme_path"] == str(starter.joinpath("README.md").resolve())
         discovered = {item["relative_path"] for item in discovery["documents"]}
-        assert discovered == {"README.md", "evaluate.py", "data.py"}
+        assert discovered == {
+            "README.md", "evaluate.py", "data.py", "ablation_features.py",
+        }
 
         first = json.loads(runtime.dispatch("read_file", {
             "path": discovery["primary_readme_path"], "offset": 0, "max_chars": 17,
@@ -446,8 +473,12 @@ def test_completed_task_context_persists_across_iteration_runtimes():
         starter.joinpath("README.md").write_text("Task documentation.\n", encoding="utf-8")
         starter.joinpath("evaluate.py").write_text("metric = 'primary'\n", encoding="utf-8")
         starter.joinpath("baseline.py").write_text("MODEL = 'fm'\n", encoding="utf-8")
-        unread_source = starter / "data.py"
-        unread_source.write_text("SPLITS = {}\n", encoding="utf-8")
+        data_source = starter / "data.py"
+        data_source.write_text("FIELDS = ['user_id']\n", encoding="utf-8")
+        feature_ablation = starter / "ablation_features.py"
+        feature_ablation.write_text("RESULT = '13 static fields: no gain'\n", encoding="utf-8")
+        unread_source = starter / "baseline_scores.json"
+        unread_source.write_text("{}\n", encoding="utf-8")
         first_trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
         second_trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
         config.BASELINE_ROOT = starter
@@ -459,6 +490,8 @@ def test_completed_task_context_persists_across_iteration_runtimes():
             discovery["primary_readme_path"],
             str(starter.joinpath("baseline.py").resolve()),
             str(starter.joinpath("evaluate.py").resolve()),
+            str(data_source.resolve()),
+            str(feature_ablation.resolve()),
             str(first_trial.joinpath("model.py").resolve()),
         ]
         for path in required_paths:
@@ -650,11 +683,21 @@ class _FakeClient(LLMClient):
 
 
 class _BootstrapThenExecuteClient(_FakeClient):
-    def __init__(self, readme: Path, baseline: Path, evaluate: Path, model: Path):
+    def __init__(
+        self,
+        readme: Path,
+        baseline: Path,
+        evaluate: Path,
+        data: Path,
+        feature_ablation: Path,
+        model: Path,
+    ):
         super().__init__()
         self.readme = str(readme.resolve())
         self.baseline = str(baseline.resolve())
         self.evaluate = str(evaluate.resolve())
+        self.data = str(data.resolve())
+        self.feature_ablation = str(feature_ablation.resolve())
         self.model = str(model.resolve())
 
     def complete(self, messages, tools=None, max_tokens=4096):
@@ -675,6 +718,14 @@ class _BootstrapThenExecuteClient(_FakeClient):
                     ToolCall(
                         id="read_evaluate", name="read_file",
                         input={"path": self.evaluate, "offset": 0},
+                    ),
+                    ToolCall(
+                        id="read_data", name="read_file",
+                        input={"path": self.data, "offset": 0},
+                    ),
+                    ToolCall(
+                        id="read_feature_ablation", name="read_file",
+                        input={"path": self.feature_ablation, "offset": 0},
                     ),
                     ToolCall(
                         id="read_model", name="read_file",
@@ -711,7 +762,8 @@ class _BootstrapThenExecuteClient(_FakeClient):
                 tool_calls=[ToolCall(
                     id="record_context", name="record_task_context",
                     input=_task_context_payload([
-                        self.readme, self.baseline, self.evaluate, self.model,
+                        self.readme, self.baseline, self.evaluate, self.data,
+                        self.feature_ablation, self.model,
                     ]),
                 )],
                 stop_reason="tool_use", input_tokens=10, output_tokens=4,
@@ -743,10 +795,19 @@ def test_research_agent_completes_and_retains_the_bootstrap_before_running():
         readme = starter / "README.md"
         baseline = starter / "baseline.py"
         evaluate = starter / "evaluate.py"
+        data = starter / "data.py"
+        feature_ablation = starter / "ablation_features.py"
         model = trial / "model.py"
         readme.write_text("A" * 300, encoding="utf-8")
         baseline.write_text("MODEL = 'fm'\n", encoding="utf-8")
         evaluate.write_text("metric = 'primary'\n", encoding="utf-8")
+        data.write_text(
+            "FIELDS = ['user_id', 'video_id', 'author_id', 'tab', 'dur_bucket']\n",
+            encoding="utf-8",
+        )
+        feature_ablation.write_text(
+            "RESULT = '13 static fields: no gain'\n", encoding="utf-8"
+        )
         model.write_text(
             """import argparse, json
 ap = argparse.ArgumentParser()
@@ -758,7 +819,9 @@ print(json.dumps({'GAUC': 0.6674, 'nDCG@5': 0.5358, 'primary': 0.6016}))
         )
         config.BASELINE_ROOT = starter
         config.AGENT_READ_MAX_CHARS = 200
-        client = _BootstrapThenExecuteClient(readme, baseline, evaluate, model)
+        client = _BootstrapThenExecuteClient(
+            readme, baseline, evaluate, data, feature_ablation, model
+        )
         original_inspector = agent_tools_module.inspect_train_valid_data
         agent_tools_module.inspect_train_valid_data = lambda _config: {
             "policy": "train and validation only",
@@ -1020,6 +1083,106 @@ def test_prompt_templates_render_and_have_a_stable_hash():
     assert "experiment `1`" in first.content
     assert first.template_sha256 == second.template_sha256
     assert len(first.template_sha256) == 64
+
+
+def test_inspect_data_exposes_candidate_feature_sources_without_hidden_rows():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        data_dir = Path(temp)
+        log_header = (
+            "user_id,video_id,date,is_click,is_like,is_follow,is_comment,is_forward,"
+            "long_view,duration_ms,tab\n"
+        )
+        data_dir.joinpath("log_standard_4_08_to_4_21_pure.csv").write_text(
+            log_header + "u1,v1,20220408,1,0,0,0,0,1,1000,1\n",
+            encoding="utf-8",
+        )
+        data_dir.joinpath("log_standard_4_22_to_5_08_pure.csv").write_text(
+            log_header + "u1,v2,20220422,0,1,0,0,0,0,2000,0\n",
+            encoding="utf-8",
+        )
+        data_dir.joinpath("user_features_pure.csv").write_text(
+            "user_id,user_active_degree,register_days\nu1,full_active,100\n",
+            encoding="utf-8",
+        )
+        data_dir.joinpath("video_features_basic_pure.csv").write_text(
+            "video_id,author_id,music_id,video_type\nv1,a1,m1,NORMAL\n",
+            encoding="utf-8",
+        )
+        data_dir.joinpath("video_features_statistic_pure.csv").write_text(
+            "video_id,show_cnt,play_progress\nv1,10,0.5\n",
+            encoding="utf-8",
+        )
+        config.DATA_DIR = data_dir
+
+        summary = inspect_train_valid_data(config)
+
+        inventory = summary["candidate_data"]
+        assert inventory["raw_files_are_immutable_inputs"]
+        assert inventory["baseline_fields"] == [
+            "user_id", "video_id", "author_id", "tab", "dur_bucket",
+        ]
+        assert "music_id" in inventory["files"]["video_features_basic_pure.csv"]["columns"]
+        assert "register_days" in inventory["files"]["user_features_pure.csv"]["columns"]
+        assert "model.py" in inventory["implementation_boundary"]
+        assert set(summary) >= {"train", "valid", "candidate_data"}
+        assert "test" not in summary
+
+
+def test_task_context_requires_the_measured_static_feature_dead_end():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        model_path = trial / "model.py"
+        model_path.write_text("value = 1\n", encoding="utf-8")
+        resolved_model = str(model_path.resolve())
+        state = BootstrapState(
+            required=False,
+            required_candidate_model_path=resolved_model,
+            fully_read_paths={resolved_model},
+        )
+        runtime = AgentToolRuntime(trial, config, state)
+        payload = _task_context_payload([resolved_model])
+        payload["feature_engineering_context"]["measured_dead_ends"] = [
+            "Try arbitrary extra columns."
+        ]
+
+        result = json.loads(runtime.dispatch("record_task_context", payload))
+
+        assert result["error"] == "TASK_CONTEXT_INVALID"
+        assert any("13 static fields" in error for error in result["feature_context_errors"])
+
+
+def test_feature_experiment_requires_sources_transforms_and_leakage_controls():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        runtime = AgentToolRuntime(trial, config, BootstrapState(required=False))
+        runtime.dispatch("write_file", {
+            "path": "model.py",
+            "content": _CHANGED_SCORING_MODEL,
+        })
+        payload = {
+            "hypothesis": "Add train-history item popularity as a feature.",
+            "reasoning": "It varies within user and is computed from training impressions.",
+            "target_component": "features",
+        }
+
+        rejected = json.loads(runtime.dispatch("run_model", payload))
+        assert not rejected["success"]
+        assert "FEATURE_EVIDENCE_REQUIRED" in rejected["error"]
+
+        payload.update({
+            "feature_sources": ["training user_id/video_id impression history"],
+            "feature_transformations": ["log1p train-only video impression count"],
+            "leakage_controls": [
+                "Fit counts on splits['train'] only and apply the frozen mapping to validation."
+            ],
+        })
+        scored = json.loads(runtime.dispatch("run_model", payload))
+        assert scored["success"]
+        assert scored["proposal"]["feature_sources"] == payload["feature_sources"]
 
 
 def main() -> None:

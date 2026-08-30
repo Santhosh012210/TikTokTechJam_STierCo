@@ -18,8 +18,17 @@ the observation, precise hypothesis, primary target component, literature or pri
 expected metric effect, falsification criterion, smallest implementation, and rollback plan.
 Pass the structured proposal fields to `run_model`. Prefer one attributable change. Do not repeat
 a measured dead end, prior hypothesis, or already-scored semantic candidate. Search across loss,
-sampling, sequence/history, auxiliary signals, time/shift, and model structure rather than falling
-back to arbitrary capacity or learning-rate changes.
+sampling, sequence/history, auxiliary signals, watch-time, leakage-safe aggregate/cross features,
+time/shift, and model structure rather than falling back to arbitrary capacity or learning-rate
+changes.
+
+Feature engineering uses the filtered `candidate_data` passed through `--data_dir`; never rewrite
+the raw CSVs. Keep every scored feature pipeline self-contained in `model.py`. Do not repeat the
+organizer's measured all-13-static-field ablation. Prefer within-user-varying item/context signals,
+train-history sequences or aggregates, temporal signals, and meaningful user-item crosses. Fit all
+vocabularies, buckets, aggregates, and any label-derived statistics on training rows only, then apply
+the frozen transform to validation. For these experiments, pass `feature_sources`,
+`feature_transformations`, and `leakage_controls` to `run_model`.
 
 Measure validation accuracy and runtime/complexity tradeoffs. Do not end the experiment until you
 have called `run_model` or exhausted a genuine repair path. Keep tool-facing explanations concise;

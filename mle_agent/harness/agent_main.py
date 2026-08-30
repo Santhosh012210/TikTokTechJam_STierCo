@@ -65,6 +65,11 @@ def _log_row(
         "hypothesis": result.hypothesis,
         "hypothesis_source": "single_agent",
         "target_component": str(proposal.get("target_component", "agent_selected")),
+        "feature_engineering": {
+            "sources": list(proposal.get("feature_sources", [])),
+            "transformations": list(proposal.get("feature_transformations", [])),
+            "leakage_controls": list(proposal.get("leakage_controls", [])),
+        },
         "code_path": str(code_path),
         "code_diff": code_diff,
         "code_diff_reason": (

@@ -217,6 +217,14 @@ class ResearchAgent:
                 and state.required_baseline_path in state.fully_read_paths
             ),
             bool(
+                state.required_data_path
+                and state.required_data_path in state.fully_read_paths
+            ),
+            bool(
+                state.required_feature_ablation_path
+                and state.required_feature_ablation_path in state.fully_read_paths
+            ),
+            bool(
                 state.required_candidate_model_path
                 and state.required_candidate_model_path in state.fully_read_paths
             ),
