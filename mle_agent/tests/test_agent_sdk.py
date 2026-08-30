@@ -17,6 +17,7 @@ from mle_agent.harness.agent_tools import (
     execute_model,
     inspect_ml_environment,
     inspect_train_valid_data,
+    install_python_dependencies,
 )
 from mle_agent.harness.config import load_config
 from mle_agent.harness.console import RunConsole
@@ -29,6 +30,11 @@ from mle_agent.harness.data_view import (
 from mle_agent.harness.hooks import PostFileSaveHook, run_post_file_save_hooks
 from mle_agent.harness.logger import RunLogger
 from mle_agent.harness.root_model import make_root_model_py
+from mle_agent.harness.run_environment import (
+    AUTO_INSTALL_ALLOWLIST,
+    create_run_environment,
+    snapshot_run_environment,
+)
 from mle_agent.harness.submission import write_hidden_submission
 from mle_agent.harness.provider import (
     LLMClient,
@@ -53,6 +59,15 @@ def test_test_split_scanner_catches_aliases_and_computed_keys():
     assert scan_candidate_source("x = splits['te' + 'st']")
     assert scan_candidate_source("x = splits.get('test')")
     assert not scan_candidate_source("x = splits['train']\ny = splits['valid']")
+
+
+def test_candidate_cannot_bypass_the_dependency_install_policy():
+    assert scan_candidate_source("import subprocess\nsubprocess.run(['pip', 'install', 'x'])")
+    assert scan_candidate_source("import pip\npip.main(['install', 'x'])")
+    assert scan_candidate_source("import os\nos.system('python -m pip install x')")
+    assert scan_candidate_source("from os import system\nsystem('pip install x')")
+    assert scan_candidate_source("pip = __import__('pip')")
+    assert not scan_candidate_source("import os\npath = os.path.join('train', 'features.csv')")
 
 
 def test_candidate_write_cannot_escape_to_prefix_sibling():
@@ -1214,6 +1229,142 @@ def test_environment_inventory_reports_framework_availability_without_importing(
     assert "open-source" in inventory["policy"]
 
 
+def test_run_environment_is_dedicated_and_writes_a_resolved_lock():
+    config = load_config()
+    base_python = config.PYTHON_EXE
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        workspace = root / "experiment_workspace" / "run_001"
+        artifact_run = root / "artifacts" / "runs" / "run_001"
+        workspace.mkdir(parents=True)
+
+        created = create_run_environment(config, workspace, artifact_run)
+        completed = snapshot_run_environment(config, phase="test_complete")
+
+        assert created["success"]
+        assert completed["success"]
+        assert config.PYTHON_EXE != base_python
+        assert Path(config.PYTHON_EXE).is_relative_to((workspace / ".venv").resolve())
+        assert Path(str(completed["requirements_lock"])).is_file()
+        manifest = json.loads(
+            (artifact_run / "environment" / "manifest.json").read_text()
+        )
+        assert manifest["binary_only_installs"] is True
+        assert manifest["auto_install_allowlist"] == sorted(AUTO_INSTALL_ALLOWLIST)
+        assert [item["phase"] for item in manifest["snapshots"]] == [
+            "created", "test_complete",
+        ]
+
+
+def test_allowlisted_dependency_auto_installs_without_user_intervention():
+    config = load_config()
+    installs: list[list[str]] = []
+    original_probe = agent_tools_module._probe_python_environment
+    agent_tools_module._probe_python_environment = lambda _config, names: {
+        "success": True,
+        "packages": {
+            name: {"installed": False, "version": None} for name in names
+        },
+    }
+    try:
+        with tempfile.TemporaryDirectory() as temp:
+            trial = Path(temp)
+            trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+            runtime = AgentToolRuntime(
+                trial,
+                config,
+                BootstrapState(required=False),
+                dependency_approver=lambda _requirements, _justification: (
+                    (_ for _ in ()).throw(AssertionError("approval must not be requested"))
+                ),
+                dependency_installer=lambda _config, requirements: {
+                    "success": not installs.append(requirements),
+                    "installed_versions": {"lightgbm": "4.6.0"},
+                    "output_tail": "installed binary wheel",
+                },
+            )
+
+            result = json.loads(runtime.dispatch("request_dependency_install", {
+                "packages": ["lightgbm>=4"],
+                "justification": "Evaluate LambdaRank on within-user impression groups.",
+            }))
+
+            assert result["success"]
+            assert installs == [["lightgbm>=4"]]
+            operation = result["operations"][0]
+            assert operation["authorization"] == "auto_allowlist"
+            assert operation["approval_required"] is False
+            assert operation["human_intervention"] is False
+            assert operation["binary_only"] is True
+    finally:
+        agent_tools_module._probe_python_environment = original_probe
+
+
+def test_already_available_dependency_request_is_still_logged():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        runtime = AgentToolRuntime(
+            trial, config, BootstrapState(required=False)
+        )
+
+        result = json.loads(runtime.dispatch("request_dependency_install", {
+            "packages": ["numpy"],
+            "justification": "Use the already available numerical runtime.",
+        }))
+
+        assert result["status"] == "ALREADY_AVAILABLE"
+        assert runtime.dependency_events[0]["outcome"] == "already_available"
+        assert runtime.dependency_events[0]["installed_versions"]["numpy"]
+
+
+def test_installer_targets_only_the_run_venv_with_binary_wheels():
+    config = load_config()
+    original_run = agent_tools_module.subprocess.run
+    original_snapshot = agent_tools_module.snapshot_run_environment
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        if "-c" in command:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps({
+                    "success": True,
+                    "packages": {
+                        "lightgbm": {"installed": True, "version": "4.6.0"},
+                    },
+                }),
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout="installed", stderr="")
+
+    try:
+        with tempfile.TemporaryDirectory() as temp:
+            config.RUN_ENV_DIR = Path(temp) / ".venv"
+            config.PYTHON_EXE = str(config.RUN_ENV_DIR / "bin" / "python")
+            agent_tools_module.subprocess.run = fake_run
+            agent_tools_module.snapshot_run_environment = (
+                lambda _config, phase: {"success": True, "phase": phase}
+            )
+
+            result = install_python_dependencies(config, ["lightgbm>=4"])
+
+            install_command, install_kwargs = calls[0]
+            assert result["success"]
+            assert install_command[0] == config.PYTHON_EXE
+            assert "--isolated" in install_command
+            assert "--only-binary=:all:" in install_command
+            assert "--no-input" in install_command
+            assert "--user" not in install_command
+            assert install_kwargs["env"]["PIP_REQUIRE_VIRTUALENV"] == "true"
+            assert install_kwargs["env"]["PYTHONNOUSERSITE"] == "1"
+    finally:
+        agent_tools_module.subprocess.run = original_run
+        agent_tools_module.snapshot_run_environment = original_snapshot
+
+
 def test_dependency_install_requires_approval_and_records_the_intervention():
     config = load_config()
     approvals: list[tuple[list[str], str]] = []
@@ -1249,24 +1400,18 @@ def test_dependency_install_requires_approval_and_records_the_intervention():
         }))
 
         assert result["success"]
-        assert result["approved"]
+        assert result["operations"][0]["approved"]
         assert approvals == [(
             ["hackathon-ml-framework==1.2.3"],
             "Faithfully evaluate a framework-backed ranking model.",
         )]
         assert installs == [["hackathon-ml-framework==1.2.3"]]
-        assert runtime.dependency_events == [{
-            "type": "dependency_install",
-            "requirements": ["hackathon-ml-framework==1.2.3"],
-            "justification": "Faithfully evaluate a framework-backed ranking model.",
-            "approved": True,
-            "human_intervention": True,
-            "success": True,
-            "outcome": "installed",
-            "installed_versions": {"hackathon-ml-framework": "1.2.3"},
-            "error": None,
-            "output_tail": "installed",
-        }]
+        event = runtime.dependency_events[0]
+        assert event["authorization"] == "user_approved_off_allowlist"
+        assert event["approval_required"] is True
+        assert event["human_intervention"] is True
+        assert event["outcome"] == "installed"
+        assert event["installed_versions"] == {"hackathon-ml-framework": "1.2.3"}
 
 
 def test_dependency_request_rejects_urls_and_respects_user_refusal():
@@ -1287,15 +1432,23 @@ def test_dependency_request_rejects_urls_and_respects_user_refusal():
             "packages": ["framework @ https://example.com/package.whl"],
             "justification": "Use a remote wheel.",
         }))
+        invalid_extras = json.loads(runtime.dispatch("request_dependency_install", {
+            "packages": ["torch[cuda]"],
+            "justification": "Request an unconstrained extra.",
+        }))
         declined = json.loads(runtime.dispatch("request_dependency_install", {
             "packages": ["hackathon-declined-framework"],
             "justification": "Test an optional model family.",
         }))
 
         assert invalid["error"] == "INVALID_DEPENDENCY_REQUEST"
+        assert invalid_extras["error"] == "INVALID_DEPENDENCY_REQUEST"
         assert declined["error"] == "DEPENDENCY_INSTALL_DECLINED"
-        assert declined["human_intervention"]
+        assert declined["operations"][0]["human_intervention"]
         assert installs == []
+        assert runtime.dependency_events[0]["outcome"] == "invalid_request"
+        assert runtime.dependency_events[1]["outcome"] == "invalid_request"
+        assert runtime.dependency_events[2]["outcome"] == "user_declined"
 
 
 def main() -> None:

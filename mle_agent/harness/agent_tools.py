@@ -19,9 +19,14 @@ from pathlib import Path
 from typing import Callable
 
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
 
 from mle_agent.harness.config import Config
 from mle_agent.harness.metrics import try_extract_metrics
+from mle_agent.harness.run_environment import (
+    AUTO_INSTALL_ALLOWLIST,
+    snapshot_run_environment,
+)
 from mle_agent.harness.tools import exec_write_file, redact_secrets
 from mle_agent.harness.validator import scan_candidate_source
 from mle_agent.research_agent.knowledge import SEARCH_ML_LITERATURE_TOOL, search_ml_literature
@@ -92,8 +97,9 @@ AGENT_TOOLS = [
         "name": "request_dependency_install",
         "description": (
             "Request installation of missing PyPI packages into the run's Python environment. "
-            "The harness always asks the user for explicit permission before changing the environment; "
-            "the approval or refusal is logged as a manual intervention. URLs and pip flags are rejected."
+            "Allowlisted ML packages install automatically as binary wheels in the dedicated run "
+            "venv. Off-allowlist packages require explicit user approval. Every outcome is logged; "
+            "URLs, extras, markers, and pip flags are rejected."
         ),
         "parameters": {
             "type": "object",
@@ -636,14 +642,23 @@ def inspect_train_valid_data(config: Config) -> dict[str, object]:
 
 
 _ML_DISTRIBUTIONS = (
+    "catboost",
+    "imbalanced-learn",
+    "lightgbm",
     "numpy",
+    "optuna",
     "pandas",
+    "polars",
+    "pyarrow",
+    "recbole",
     "scikit-learn",
+    "scipy",
+    "statsmodels",
     "torch",
+    "torchaudio",
     "torchvision",
     "torchrec",
-    "recbole",
-    "lightgbm",
+    "transformers",
     "xgboost",
     "tensorflow",
 )
@@ -733,10 +748,15 @@ def inspect_ml_environment(config: Config) -> dict[str, object]:
     """Return package availability without importing heavyweight frameworks."""
     inventory = _probe_python_environment(config, _ML_DISTRIBUTIONS)
     inventory["policy"] = (
-        "The hackathon permits any open-source library or framework. Use an installed "
-        "framework when it supports the hypothesis; request explicit user approval before "
-        "installing a missing dependency."
+        "The hackathon permits open-source frameworks. Missing allowlisted ML packages "
+        "auto-install as binary wheels in this run's dedicated venv; off-allowlist "
+        "packages require explicit approval. Every resolution is logged and frozen."
     )
+    inventory["environment_dir"] = (
+        str(config.RUN_ENV_DIR) if config.RUN_ENV_DIR is not None else None
+    )
+    inventory["auto_install_allowlist"] = sorted(AUTO_INSTALL_ALLOWLIST)
+    inventory["binary_only_installs"] = True
     return inventory
 
 
@@ -753,6 +773,8 @@ def _validated_requirements(packages: object) -> list[tuple[str, Requirement]]:
             raise ValueError(f"invalid PyPI requirement {raw!r}: {exc}") from exc
         if requirement.url is not None or requirement.marker is not None:
             raise ValueError("dependency URLs and environment markers are not allowed")
+        if requirement.extras:
+            raise ValueError("dependency extras are not allowed; request the base package")
         validated.append((str(requirement), requirement))
     return validated
 
@@ -774,12 +796,48 @@ def _requirement_is_satisfied(
 def install_python_dependencies(
     config: Config, requirements: list[str], timeout_seconds: int = 1200
 ) -> dict[str, object]:
-    """Install validated PyPI requirements without invoking a shell."""
-    command = [config.PYTHON_EXE, "-m", "pip", "install", *requirements]
+    """Install binary wheels only into the dedicated per-run venv."""
+    if config.RUN_ENV_DIR is None:
+        return {
+            "success": False,
+            "requirements": requirements,
+            "installed_versions": {},
+            "error": "dedicated per-run Python environment is not configured",
+            "output_tail": "",
+        }
+    expected_python = config.RUN_ENV_DIR / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    configured_python = Path(config.PYTHON_EXE)
+    if not configured_python.is_absolute():
+        configured_python = config.PROJECT_ROOT / configured_python
+    if configured_python.absolute() != expected_python.absolute():
+        return {
+            "success": False,
+            "requirements": requirements,
+            "installed_versions": {},
+            "error": "refusing to install outside the dedicated per-run venv",
+            "output_tail": "",
+        }
+    command = [
+        config.PYTHON_EXE,
+        "-m",
+        "pip",
+        "--isolated",
+        "install",
+        "--disable-pip-version-check",
+        "--no-input",
+        "--only-binary=:all:",
+        *requirements,
+    ]
+    env = dict(os.environ)
+    env["PIP_REQUIRE_VIRTUALENV"] = "true"
+    env["PYTHONNOUSERSITE"] = "1"
     try:
         result = subprocess.run(
             command,
             cwd=str(config.PROJECT_ROOT),
+            env=env,
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
@@ -797,12 +855,17 @@ def install_python_dependencies(
             )
             for name, details in installed_packages.items()
         }
+        snapshot = snapshot_run_environment(
+            config, phase="dependency_install"
+        ) if result.returncode == 0 else None
         return {
             "success": result.returncode == 0,
             "returncode": result.returncode,
             "requirements": requirements,
             "installed_versions": installed_versions,
             "output_tail": output[-4000:],
+            "binary_only": True,
+            "environment_snapshot": snapshot,
         }
     except subprocess.TimeoutExpired as exc:
         output = redact_secrets((exc.stdout or "") + (exc.stderr or ""))
@@ -962,87 +1025,209 @@ class AgentToolRuntime:
                 return self._bootstrap_rejection("request_dependency_install")
             justification = str(payload.get("justification", "")).strip()
             if not justification:
-                return json.dumps({
+                event = {
+                    "type": "dependency_request",
+                    "requirements": list(payload.get("packages") or []),
+                    "justification": "",
                     "success": False,
+                    "human_intervention": False,
+                    "outcome": "justification_required",
                     "error": "DEPENDENCY_JUSTIFICATION_REQUIRED",
+                }
+                self.dependency_events.append(event)
+                return json.dumps({
+                    **event,
                 }, ensure_ascii=False, indent=2)
             try:
                 validated = _validated_requirements(payload.get("packages"))
             except ValueError as exc:
-                return json.dumps({
+                event = {
+                    "type": "dependency_request",
+                    "requirements": list(payload.get("packages") or []),
+                    "justification": justification,
                     "success": False,
+                    "human_intervention": False,
+                    "outcome": "invalid_request",
                     "error": "INVALID_DEPENDENCY_REQUEST",
                     "detail": str(exc),
+                }
+                self.dependency_events.append(event)
+                return json.dumps({
+                    **event,
                 }, ensure_ascii=False, indent=2)
             requested_environment = _probe_python_environment(
                 self.config, [requirement.name for _, requirement in validated]
             )
             pending = [
-                spec
+                (spec, requirement)
                 for spec, requirement in validated
                 if not _requirement_is_satisfied(
                     requirement, requested_environment["packages"]
                 )
             ]
             if not pending:
-                return json.dumps({
-                    "success": True,
-                    "status": "ALREADY_AVAILABLE",
-                    "requirements": [spec for spec, _ in validated],
-                    "environment": inspect_ml_environment(self.config),
-                }, ensure_ascii=False, indent=2)
-            if self.dependency_approver is None:
+                installed_versions = {
+                    requirement.name: requested_environment["packages"][
+                        requirement.name
+                    ].get("version")
+                    for _, requirement in validated
+                }
                 event = {
-                    "type": "dependency_install",
-                    "requirements": pending,
+                    "type": "dependency_request",
+                    "requirements": [spec for spec, _ in validated],
                     "justification": justification,
-                    "approved": False,
-                    "success": False,
+                    "authorization": "already_available",
+                    "approval_required": False,
+                    "success": True,
                     "human_intervention": False,
-                    "outcome": "approval_unavailable",
+                    "outcome": "already_available",
+                    "installed_versions": installed_versions,
+                    "environment": self.config.PYTHON_EXE,
                 }
                 self.dependency_events.append(event)
                 return json.dumps({
                     **event,
-                    "error": "DEPENDENCY_APPROVAL_UNAVAILABLE",
+                    "status": "ALREADY_AVAILABLE",
                 }, ensure_ascii=False, indent=2)
-            try:
-                approved = bool(self.dependency_approver(pending, justification))
-            except (EOFError, KeyboardInterrupt):
-                approved = False
-            event = {
-                "type": "dependency_install",
-                "requirements": pending,
-                "justification": justification,
-                "approved": approved,
-                "human_intervention": True,
-            }
-            if not approved:
-                event.update({"success": False, "outcome": "user_declined"})
+
+            auto_pending = [
+                spec for spec, requirement in pending
+                if canonicalize_name(requirement.name) in AUTO_INSTALL_ALLOWLIST
+            ]
+            restricted_pending = [
+                spec for spec, requirement in pending
+                if canonicalize_name(requirement.name) not in AUTO_INSTALL_ALLOWLIST
+            ]
+            operations: list[dict[str, object]] = []
+
+            if auto_pending:
+                install_result = self.dependency_installer(
+                    self.config, auto_pending
+                )
+                event = {
+                    "type": "dependency_install",
+                    "requirements": auto_pending,
+                    "justification": justification,
+                    "authorization": "auto_allowlist",
+                    "approval_required": False,
+                    "approved": True,
+                    "binary_only": True,
+                    "success": bool(install_result.get("success")),
+                    "human_intervention": False,
+                    "outcome": (
+                        "installed" if install_result.get("success")
+                        else "install_failed"
+                    ),
+                    "installed_versions": install_result.get(
+                        "installed_versions", {}
+                    ),
+                    "environment": self.config.PYTHON_EXE,
+                    "environment_snapshot": install_result.get(
+                        "environment_snapshot"
+                    ),
+                    "error": install_result.get("error"),
+                    "output_tail": str(
+                        install_result.get("output_tail", "")
+                    )[-1000:],
+                }
                 self.dependency_events.append(event)
-                return json.dumps({
-                    **event,
-                    "error": "DEPENDENCY_INSTALL_DECLINED",
-                    "instruction": "Choose an installed alternative or revise the experiment.",
-                }, ensure_ascii=False, indent=2)
-            install_result = self.dependency_installer(self.config, pending)
-            event.update({
-                "success": bool(install_result.get("success")),
-                "outcome": "installed" if install_result.get("success") else "install_failed",
-                "installed_versions": install_result.get("installed_versions", {}),
-                "error": install_result.get("error"),
-                "output_tail": str(install_result.get("output_tail", ""))[-1000:],
-            })
-            self.dependency_events.append(event)
-            if install_result.get("success"):
+                operations.append(event)
+
+            if restricted_pending and self.dependency_approver is None:
+                event = {
+                    "type": "dependency_install",
+                    "requirements": restricted_pending,
+                    "justification": justification,
+                    "authorization": "off_allowlist",
+                    "approval_required": True,
+                    "approved": False,
+                    "binary_only": True,
+                    "success": False,
+                    "human_intervention": False,
+                    "outcome": "approval_unavailable",
+                    "environment": self.config.PYTHON_EXE,
+                    "error": "DEPENDENCY_APPROVAL_UNAVAILABLE",
+                }
+                self.dependency_events.append(event)
+                operations.append(event)
+            elif restricted_pending:
+                try:
+                    approved = bool(self.dependency_approver(
+                        restricted_pending, justification
+                    ))
+                except (EOFError, KeyboardInterrupt):
+                    approved = False
+                if approved:
+                    install_result = self.dependency_installer(
+                        self.config, restricted_pending
+                    )
+                    event = {
+                        "type": "dependency_install",
+                        "requirements": restricted_pending,
+                        "justification": justification,
+                        "authorization": "user_approved_off_allowlist",
+                        "approval_required": True,
+                        "approved": True,
+                        "binary_only": True,
+                        "success": bool(install_result.get("success")),
+                        "human_intervention": True,
+                        "outcome": (
+                            "installed" if install_result.get("success")
+                            else "install_failed"
+                        ),
+                        "installed_versions": install_result.get(
+                            "installed_versions", {}
+                        ),
+                        "environment": self.config.PYTHON_EXE,
+                        "environment_snapshot": install_result.get(
+                            "environment_snapshot"
+                        ),
+                        "error": install_result.get("error"),
+                        "output_tail": str(
+                            install_result.get("output_tail", "")
+                        )[-1000:],
+                    }
+                else:
+                    event = {
+                        "type": "dependency_install",
+                        "requirements": restricted_pending,
+                        "justification": justification,
+                        "authorization": "user_declined_off_allowlist",
+                        "approval_required": True,
+                        "approved": False,
+                        "binary_only": True,
+                        "success": False,
+                        "human_intervention": True,
+                        "outcome": "user_declined",
+                        "environment": self.config.PYTHON_EXE,
+                        "error": "DEPENDENCY_INSTALL_DECLINED",
+                    }
+                self.dependency_events.append(event)
+                operations.append(event)
+
+            if any(operation.get("success") for operation in operations):
                 self.bootstrap_state.environment_inventory = inspect_ml_environment(self.config)
+            success = bool(operations) and all(
+                bool(operation.get("success")) for operation in operations
+            )
+            first_error = next(
+                (
+                    str(operation["error"])
+                    for operation in operations
+                    if operation.get("error")
+                ),
+                None,
+            )
             return json.dumps({
-                **event,
-                "output_tail": event["output_tail"],
+                "success": success,
+                "requirements": [spec for spec, _ in validated],
+                "operations": operations,
+                "error": first_error,
                 "instruction": (
-                    "Dependency is available; implement and evaluate the justified experiment."
-                    if install_result.get("success")
-                    else "Read the installer error and choose a compatible framework or version."
+                    "Dependencies are available; implement and evaluate the experiment."
+                    if success
+                    else "Use the successful installs if relevant, then choose an installed "
+                    "alternative for every denied or failed dependency."
                 ),
             }, ensure_ascii=False, indent=2)
         if name == "search_ml_literature":

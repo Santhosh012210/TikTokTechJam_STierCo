@@ -119,16 +119,18 @@ to disable it or `FORCE_COLOR=1` to force ANSI colour output. Each Agent block i
 up to five sanitized lines of the provider's assistant text. Function-call-only responses
 are labelled explicitly instead of being presented as hidden reasoning.
 
-The agent may also pause when a concrete experiment needs a missing open-source dependency. It
-prints the exact validated PyPI requirements and its justification, then asks whether to install
-them into `.venv`. Answering `y` permits only that request; answering `n` instructs the agent to use
-an installed alternative. Each decision is logged as a manual intervention. The agent cannot pass
-pip flags or URLs and is instructed never to invoke a package manager from generated model code.
+Each run creates `experiment_workspace/<run_id>/.venv`; dependency writes never target the project,
+system, or user environment. Missing packages on the curated ML allowlist install automatically
+using binary wheels only. An off-allowlist request prints its exact validated requirements and
+justification, then asks `y/n`; answering `n` sends the agent to an installed alternative. URLs,
+extras, markers, pip flags, and source distributions are rejected. Every request and outcome is
+logged, while `artifacts/runs/<run_id>/environment/requirements.lock.txt` pins the resolved run.
 
 Trial code goes to the gitignored `experiment_workspace/<run_id>/trial_NNN/`. Durable
 evidence goes to `artifacts/runs/<run_id>/` as `logs/events.jsonl`,
 `logs/llm_events.jsonl`, `results/metrics.json`,
-and `reports/summary.md`. See `artifacts/README.md` for promoting a run to `artifacts/final/`.
+`reports/summary.md`, and `environment/{manifest.json,requirements.lock.txt}`. See
+`artifacts/README.md` for promoting a run to `artifacts/final/`.
 
 Each run also creates `experiment_workspace/<run_id>/candidate_data`, a filtered copy containing
 training and validation rows but no test rows. The bootstrap exposes its CSV column inventory after

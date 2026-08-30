@@ -153,7 +153,8 @@ class ResearchAgent:
             environment=self.config.PYTHON_EXE,
         )
         prompt = (
-            "Allow the agent to install these packages into the project environment: "
+            "These packages are outside the auto-install allowlist. Allow binary-wheel "
+            "installation into this run's dedicated venv: "
             + ", ".join(requirements)
             + "? [y/n]: "
         )

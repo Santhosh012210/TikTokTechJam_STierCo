@@ -1,5 +1,5 @@
 """Two responsibilities:
-1. scan_candidate_source() — reject model.py files that access the test split.
+1. scan_candidate_source() — reject hidden-test access and package-manager bypasses.
 2. validate_row() / validate_file() — enforce the JSONL log schema.
 
 Run standalone:
@@ -51,14 +51,72 @@ def scan_candidate_source(source: str) -> list[str]:
         return None
 
     for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            imported = (
+                [alias.name for alias in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""]
+            )
+            for module in imported:
+                if module.split(".", 1)[0] in {"ensurepip", "pip", "subprocess"}:
+                    message = f"candidate process-launch/package-manager import: {module}"
+                    if message not in violations:
+                        violations.append(message)
+            if isinstance(node, ast.ImportFrom) and node.module == "os":
+                for alias in node.names:
+                    if alias.name in {"system", "popen"} or alias.name.startswith(
+                        ("exec", "spawn")
+                    ):
+                        message = f"candidate process-launch import: os.{alias.name}"
+                        if message not in violations:
+                            violations.append(message)
         if isinstance(node, ast.Subscript) and constant_string(node.slice) == "test":
             message = "subscript access to the test split"
             if message not in violations:
                 violations.append(message)
         if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and (
+                node.func.id in {"system", "popen"}
+                or node.func.id.startswith(("exec", "spawn"))
+            ):
+                message = f"candidate process launch via {node.func.id}"
+                if message not in violations:
+                    violations.append(message)
+            if isinstance(node.func, ast.Attribute):
+                owner = node.func.value
+                if (
+                    isinstance(owner, ast.Name)
+                    and owner.id == "os"
+                    and (
+                        node.func.attr in {"system", "popen"}
+                        or node.func.attr.startswith(("exec", "spawn"))
+                    )
+                ):
+                    message = f"candidate process launch via os.{node.func.attr}"
+                    if message not in violations:
+                        violations.append(message)
             for arg in node.args:
                 if constant_string(arg) == "test":
                     message = "function call referencing the test split"
+                    if message not in violations:
+                        violations.append(message)
+                value = constant_string(arg)
+                if (
+                    value
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "__import__"
+                    and value.split(".", 1)[0] in {"ensurepip", "pip", "subprocess"}
+                ):
+                    message = f"dynamic candidate package/process import: {value}"
+                    if message not in violations:
+                        violations.append(message)
+                if value and re.search(
+                    r"(?:^|\s)(?:pip(?:3)?\s+install|python\s+-m\s+pip|"
+                    r"conda\s+install|uv\s+pip\s+install)(?:\s|$)",
+                    value,
+                    re.IGNORECASE,
+                ):
+                    message = "candidate package-manager command"
                     if message not in violations:
                         violations.append(message)
     return violations
@@ -209,6 +267,13 @@ def validate_row(row: dict, lineno: int = 0) -> list[str]:
             diff_reason = row.get("code_diff_reason")
             attempts = row.get("execution_attempts", [])
             recoveries = row.get("recovery_events", [])
+            intervention_count = row.get("manual_intervention_count")
+            if intervention_count is not None and (
+                not isinstance(intervention_count, int) or intervention_count < 0
+            ):
+                errors.append(
+                    f"{prefix}manual_intervention_count must be a non-negative int"
+                )
             if not str(hypothesis).strip():
                 errors.append(f"{prefix}agent v2 hypothesis must be non-empty")
             if not str(reasoning).strip():

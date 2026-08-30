@@ -20,6 +20,10 @@ from mle_agent.harness.console import console
 from mle_agent.harness.data_view import prepare_train_valid_view
 from mle_agent.harness.logger import RunLogger
 from mle_agent.harness.root_model import make_root_model_py
+from mle_agent.harness.run_environment import (
+    create_run_environment,
+    snapshot_run_environment,
+)
 from mle_agent.research_agent.adk_agent import AgentIterationResult, ResearchAgent
 
 
@@ -90,6 +94,10 @@ def _log_row(
             bool(event.get("human_intervention"))
             for event in result.recovery_events
         ),
+        "manual_intervention_count": sum(
+            1 for event in result.recovery_events
+            if bool(event.get("human_intervention"))
+        ),
         "reasoning": result.reasoning,
         "reflection": result.reflection,
         "hypothesis_supported": getattr(result, "hypothesis_supported", None),
@@ -143,6 +151,23 @@ def main() -> None:
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     workspace = config.EXPERIMENT_WORKSPACE_DIR / run_id
     workspace.mkdir(parents=True, exist_ok=True)
+    logger = RunLogger(config.ARTIFACTS_DIR, run_id, strict_validation=True)
+    initial_environment = create_run_environment(
+        config, workspace, logger.run_dir
+    )
+    if not initial_environment.get("success"):
+        logger.close()
+        raise RuntimeError(
+            "could not snapshot the dedicated run environment: "
+            + str(initial_environment.get("error", "unknown error"))
+        )
+    console.harness(
+        "Run Python environment",
+        status="Created dedicated install target for this run",
+        python=config.PYTHON_EXE,
+        binary_only="true",
+        lock=initial_environment.get("requirements_lock"),
+    )
 
     console.harness(
         "Data preparation",
@@ -150,7 +175,6 @@ def main() -> None:
     )
     split_manifest = prepare_train_valid_view(source_data_dir, workspace / "candidate_data")
     config.DATA_DIR = workspace / "candidate_data"
-    logger = RunLogger(config.ARTIFACTS_DIR, run_id, strict_validation=True)
     experiment_calls = args.agent_turns if args.agent_turns > 0 else "unlimited"
     bootstrap_calls = args.bootstrap_turns if args.bootstrap_turns > 0 else "unlimited"
 
@@ -216,6 +240,9 @@ def main() -> None:
             config.HEADROOM, "", root_path,
         ))
         totals = logger.running_totals()
+        final_environment = snapshot_run_environment(
+            config, phase="bootstrap_failed"
+        )
         failed_results = {
             "run_id": run_id,
             "architecture": "google_adk_persistent_agent",
@@ -235,6 +262,7 @@ def main() -> None:
             "prompt_templates": agent.prompt_evidence,
             "task_context_bootstrap": agent.bootstrap_evidence,
             "data_view_manifest": split_manifest,
+            "python_environment": final_environment,
         }
         logger.write_results(failed_results)
         logger.write_report(f"""# Single-agent research run {run_id}
@@ -246,6 +274,7 @@ def main() -> None:
 - Error: {failed_bootstrap.error}
 - Input/output tokens: {totals['tokens']['input']} / {totals['tokens']['output']}
 - Manual interventions: {totals['interventions']}
+- Python environment lock: `{final_environment.get('requirements_lock', 'unavailable')}`
 
 The candidate loop did not start because the autonomous bootstrap failed. See
 `logs/events.jsonl` and `logs/llm_events.jsonl` for the failure and recovery evidence.
@@ -401,6 +430,7 @@ The candidate loop did not start because the autonomous bootstrap failed. See
     if converged and stop_reason == "max_iterations":
         stop_reason = "converged"
     totals = logger.running_totals()
+    final_environment = snapshot_run_environment(config, phase="run_complete")
     total_wall_seconds = time.time() - started
     baseline_metrics = {
         "GAUC": config.BASELINE_GAUC,
@@ -451,6 +481,7 @@ The candidate loop did not start because the autonomous bootstrap failed. See
         "prompt_templates": agent.prompt_evidence,
         "task_context_bootstrap": agent.bootstrap_evidence,
         "data_view_manifest": split_manifest,
+        "python_environment": final_environment,
     }
     results_path = logger.write_results(results)
     trajectory_table = "\n".join(
@@ -506,6 +537,9 @@ The candidate loop did not start because the autonomous bootstrap failed. See
 - Provider errors: {totals['llm_trace']['provider_error']}
 - Quota pauses: {totals['llm_trace']['quota_pause']}
 - Detailed LLM trace: `{totals['llm_trace']['path']}`
+- Dedicated run Python: `{final_environment.get('python_executable', 'unavailable')}`
+- Resolved dependency lock: `{final_environment.get('requirements_lock', 'unavailable')}`
+- Resolved distributions: {final_environment.get('resolved_distribution_count', 0)}
 
 ## Prompt templates
 

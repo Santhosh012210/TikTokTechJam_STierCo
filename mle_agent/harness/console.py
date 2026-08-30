@@ -192,7 +192,18 @@ class RunConsole:
             return f"Installed ML packages: {', '.join(installed) or 'none detected'}.", success
         if name == "request_dependency_install":
             requirements = ", ".join(str(item) for item in payload.get("requirements", []))
-            outcome = payload.get("outcome") or payload.get("status") or payload.get("error")
+            operations = payload.get("operations", [])
+            operation_outcomes = [
+                f"{operation.get('authorization', '?')}:{operation.get('outcome', '?')}"
+                for operation in operations
+                if isinstance(operation, dict)
+            ]
+            outcome = (
+                ", ".join(operation_outcomes)
+                or payload.get("outcome")
+                or payload.get("status")
+                or payload.get("error")
+            )
             return f"Dependencies={requirements or '?'}; outcome={outcome}.", success
         if name == "search_ml_literature":
             hits = payload.get("results", [])

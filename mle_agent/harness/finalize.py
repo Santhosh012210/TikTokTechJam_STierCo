@@ -96,11 +96,19 @@ def finalize_run(
     if not data_dir.is_dir():
         raise FileNotFoundError(f"data directory not found: {data_dir}")
 
-    python_exe = Path(Config.PROJECT_ROOT / ".venv" / (
-        "Scripts/python.exe" if os.name == "nt" else "bin/python"
-    ))
+    environment_evidence = run_metrics.get("python_environment") or {}
+    recorded_python = environment_evidence.get("python_executable")
+    python_exe = Path(recorded_python).absolute() if recorded_python else Path(
+        Config.PROJECT_ROOT / ".venv" / (
+            "Scripts/python.exe" if os.name == "nt" else "bin/python"
+        )
+    ).absolute()
     if not python_exe.is_file():
-        raise FileNotFoundError(f"repository Python environment not found: {python_exe}")
+        raise FileNotFoundError(f"recorded Python environment not found: {python_exe}")
+    if recorded_python and not python_exe.parent.resolve().is_relative_to(workspace_root):
+        raise ValueError(
+            f"recorded run Python is outside the experiment workspace: {python_exe}"
+        )
     env = {
         key: value
         for key, value in os.environ.items()
@@ -143,6 +151,16 @@ def finalize_run(
         shutil.copy2(temporary_submission, final_dir / "submission.csv")
 
     shutil.copy2(candidate, final_dir / "model.py")
+    requirements_lock = environment_evidence.get("requirements_lock")
+    final_requirements_lock: Path | None = None
+    if requirements_lock:
+        source_lock = Path(str(requirements_lock)).resolve()
+        if not source_lock.is_relative_to(run_dir) or not source_lock.is_file():
+            raise ValueError(
+                f"recorded dependency lock is invalid for run {run_id}: {source_lock}"
+            )
+        final_requirements_lock = final_dir / "requirements.lock.txt"
+        shutil.copy2(source_lock, final_requirements_lock)
     source_hash = _sha256(final_dir / "model.py")
     submission_hash = _sha256(final_dir / "submission.csv")
     final_metrics = {
@@ -160,6 +178,10 @@ def finalize_run(
         "gpu_hours": run_metrics.get("gpu_hours", 0.0),
         "total_wall_seconds": run_metrics.get("total_wall_seconds"),
         "manual_interventions": run_metrics.get("manual_interventions"),
+        "python_environment": environment_evidence,
+        "requirements_lock": (
+            str(final_requirements_lock) if final_requirements_lock else None
+        ),
         "prompt_templates": run_metrics.get("prompt_templates"),
         "submission_validation": check_output.strip(),
         "candidate_output_tail": candidate_output[-2000:],
@@ -180,6 +202,8 @@ def finalize_run(
 - Manual interventions: `{run_metrics.get('manual_interventions', 0)}`
 - Input/output tokens: `{(run_metrics.get('tokens') or {}).get('input', 0)}` / `{(run_metrics.get('tokens') or {}).get('output', 0)}`
 - GPU-hours: `{run_metrics.get('gpu_hours', 0.0)}`
+- Python environment: `{python_exe}`
+- Resolved dependency lock: `{final_requirements_lock or 'not recorded by legacy run'}`
 
 | Validation metric | Official baseline | Final candidate | Delta |
 |---|---:|---:|---:|

@@ -273,7 +273,8 @@ class ResearchAgent:
             environment=self.config.PYTHON_EXE,
         )
         prompt = (
-            "Allow the agent to install these packages into the project environment: "
+            "These packages are outside the auto-install allowlist. Allow binary-wheel "
+            "installation into this run's dedicated venv: "
             + ", ".join(requirements)
             + "? [y/n]: "
         )
@@ -661,7 +662,7 @@ class ResearchAgent:
             justification: str,
             tool_context: ToolContext = None,
         ) -> dict[str, Any]:
-            """Ask the user before installing validated PyPI dependencies."""
+            """Resolve dependencies under the run's constrained install policy."""
             return dispatch("request_dependency_install", {
                 "packages": packages,
                 "justification": justification,

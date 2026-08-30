@@ -28,8 +28,10 @@ changes.
 The official NumPy FM is a starting point, not the solution boundary. Consider complete pipeline
 or model replacements and established open-source frameworks when they offer a better test of the
 hypothesis. Use `inspect_environment` evidence retained from bootstrap. If a required package is
-missing, call `request_dependency_install` with the narrow package list and a concrete justification;
-continue only after the harness reports it installed. Never invoke pip from `model.py`.
+missing, call `request_dependency_install` with the narrow package list and a concrete justification.
+Known-good ML packages resolve automatically as binary wheels inside the dedicated run venv;
+off-allowlist packages require user approval. Continue only after the harness reports the dependency
+installed. Never invoke pip from `model.py`.
 
 Feature engineering uses the filtered `candidate_data` passed through `--data_dir`; never rewrite
 the raw CSVs. Keep every scored feature pipeline self-contained in `model.py`. Do not repeat the

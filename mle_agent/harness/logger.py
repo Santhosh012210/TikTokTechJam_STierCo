@@ -82,7 +82,9 @@ class RunLogger:
         self._token_total["output"] += tokens.get("output", 0)
 
         # Count manual interventions
-        if row.get("human_intervention"):
+        if "manual_intervention_count" in row:
+            self._intervention_count += int(row["manual_intervention_count"])
+        elif row.get("human_intervention"):
             self._intervention_count += 1
 
         # Serialize and write

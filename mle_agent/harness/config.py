@@ -85,6 +85,9 @@ class Config:
     SEED:    int   = 42
     UCB_C:   float = 1.414
     PYTHON_EXE: str = sys.executable
+    BASE_PYTHON_EXE: str | None = None
+    RUN_ENV_DIR: Path | None = None
+    RUN_ENV_ARTIFACT_DIR: Path | None = None
 
 def load_config() -> Config:
     cfg = Config()

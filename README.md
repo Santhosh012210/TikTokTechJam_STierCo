@@ -134,11 +134,12 @@ and user-item-cross experiments without repeating the measured static-field abla
 
 The organizer's NumPy FM is a reference, not an implementation ceiling. Bootstrap also inventories
 the active Python environment without importing heavyweight packages. Experiments may replace the
-model or pipeline with any justified open-source framework allowed by the hackathon brief. When a
-required PyPI package is missing, the agent calls an approval-gated install tool; the terminal shows
-the exact package specifiers and justification, then waits for `y/n`. URLs, environment markers, and
-pip flags are rejected. Approval, refusal, installation output, and installed versions are retained
-in the run evidence, and the decision counts as a manual intervention.
+model or pipeline with any justified open-source framework allowed by the hackathon brief. Every run
+gets a dedicated venv. Missing packages on the curated ML allowlist—including sklearn, XGBoost,
+LightGBM, PyTorch, Polars, and Optuna—install automatically as binary wheels. Off-allowlist requests
+show their exact specifiers and justification and wait for `y/n`. URLs, extras, environment markers,
+pip flags, source distributions, system installs, and `--user` installs are rejected. Every request
+and outcome is logged, and the resolved environment is written to `environment/requirements.lock.txt`.
 
 When Gemini returns a real quota/rate-limit response, an interactive run asks once whether
 to resume after reset. Choosing `y` waits for the provider-advertised retry interval and

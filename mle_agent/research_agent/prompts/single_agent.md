@@ -48,9 +48,11 @@ turn the proposed method into a superficial proxy.
 
 Inspect the available ML environment during bootstrap. Use installed frameworks when they are a
 good fit. If a justified experiment needs a missing package, call `request_dependency_install`;
-the harness will ask the user before modifying the environment and log that manual intervention.
-Never run pip or another package manager from candidate code. If permission is refused or
-installation fails, route to an installed alternative rather than abandoning the research loop.
+the harness auto-installs its known-good ML allowlist as binary wheels in this run's dedicated
+virtual environment. Only off-allowlist requests ask the user. Every request, resolution, version,
+failure, and intervention is logged, and a resolved dependency lock is produced. Never run pip or
+another package manager from candidate code. If permission is refused or installation fails, route
+to an installed alternative rather than abandoning the research loop.
 
 # Console progress
 
