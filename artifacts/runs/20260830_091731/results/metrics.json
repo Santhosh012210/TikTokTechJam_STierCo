@@ -1,0 +1,51 @@
+{
+  "run_id": "20260830_091731",
+  "baseline": {
+    "GAUC": 0.6674,
+    "nDCG@5": 0.5357,
+    "primary": 0.6016
+  },
+  "best_trial": {
+    "trial": 0,
+    "primary": 0.6018549203872681,
+    "hypothesis": "FM baseline (k=16, pointwise BCE, Adam) — no change",
+    "workspace_code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_091731/trial_000/model.py"
+  },
+  "trials_completed": 1,
+  "tokens": {
+    "input": 21757,
+    "output": 2618
+  },
+  "manual_interventions": 0,
+  "tree": {
+    "total_iters": 2,
+    "best_primary": 0.6018549203872681,
+    "best_node_id": 0,
+    "nodes": {
+      "0": {
+        "id": 0,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_091731/trial_000/model.py",
+        "hypothesis": "FM baseline (k=16, pointwise BCE, Adam) — no change",
+        "primary": 0.6018549203872681,
+        "parent_id": null,
+        "visits": 1,
+        "depth": 0,
+        "children": [
+          1
+        ],
+        "status": "success"
+      },
+      "1": {
+        "id": 1,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_091731/trial_001/model.py",
+        "hypothesis": "Implement BPR: Bayesian Personalized Ranking on top of the parent model and evaluate it. See the 'bpr' entry in the method corpus for the implementation details and the conditions under which it does not help.",
+        "primary": -1.0,
+        "parent_id": 0,
+        "visits": 1,
+        "depth": 1,
+        "children": [],
+        "status": "failed"
+      }
+    }
+  }
+}

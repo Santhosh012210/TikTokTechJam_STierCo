@@ -41,12 +41,16 @@ def _format_leaderboard(nodes: list[Node]) -> str:
     )
 
 
+def _fmt_primary(p: float | None) -> str:
+    return f"{p:.4f}" if p is not None else "failed"
+
+
 def _format_history(history: list[dict]) -> str:
     if not history:
         return "  (no iterations yet)"
     return "\n".join(
         f"  trial_{h['iteration']:03d} [{h['status']:8s}] "
-        f"primary={h['primary']:.4f if h.get('primary') is not None else 'failed'} "
+        f"primary={_fmt_primary(h.get('primary'))} "
         f"| {h['hypothesis'][:80]}"
         for h in reversed(history)
     )
@@ -81,6 +85,7 @@ def run_strategist_session(
     hypothesis_history: list[dict],
     dead_ends: list[str],
     untried_directions: list[str],   # method catalogue; ordering carries no priority
+    explored_categories: list[str],  # target_component values seen this run, win or lose
     current_best: float,
     config: Config,
 ) -> StrategistResult:
@@ -115,6 +120,9 @@ Effective ceiling: nDCG=0.6968, primary=0.8484.
 ## Known dead ends — do NOT revisit
 {chr(10).join(f'  - {d}' for d in dead_ends)}
 
+## Categories already explored this run
+{chr(10).join(f'  - {c}' for c in explored_categories) if explored_categories else "  (none yet)"}
+
 ## Method corpus available to the Builder (no priority implied — you choose)
 {chr(10).join(f'  {d}' for d in untried_directions)}
 
@@ -132,6 +140,10 @@ Respond with ONLY a JSON object (no prose, no fences):
 }}
 
 Hypotheses must be implementable in numpy only (no torch required).
+Prefer proposing a hypothesis from an unexplored category over refining a category
+already tried multiple times, unless a previously-tried category shows a genuinely
+promising partial result specifically worth one more attempt — explain that reasoning
+in your "reasoning" field if so.
 """
 
     messages: list[dict] = [{"role": "user", "content": user_prompt}]

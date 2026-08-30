@@ -1,0 +1,142 @@
+{
+  "run_id": "20260830_124515",
+  "baseline": {
+    "GAUC": 0.6674,
+    "nDCG@5": 0.5357,
+    "primary": 0.6016
+  },
+  "best_trial": {
+    "trial": 4,
+    "primary": 0.6031042337417603,
+    "hypothesis": "FM + listwise-softmax with negative sampling (sample 5–10 negatives per positive per user impression) to reduce computational cost",
+    "workspace_code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_124515/trial_004/model.py"
+  },
+  "trials_completed": 8,
+  "tokens": {
+    "input": 561721,
+    "output": 63343
+  },
+  "manual_interventions": 0,
+  "tree": {
+    "total_iters": 9,
+    "best_primary": 0.6031042337417603,
+    "best_node_id": 4,
+    "nodes": {
+      "0": {
+        "id": 0,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_124515/trial_000/model.py",
+        "hypothesis": "FM baseline (k=16, pointwise BCE, Adam) — no change",
+        "primary": 0.6018549203872681,
+        "parent_id": null,
+        "visits": 2,
+        "depth": 0,
+        "children": [
+          1
+        ],
+        "status": "success"
+      },
+      "1": {
+        "id": 1,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_124515/trial_001/model.py",
+        "hypothesis": "Implement BPR: Bayesian Personalized Ranking on top of the parent model and evaluate it. See the 'bpr' entry in the method corpus for the implementation details and the conditions under which it does not help.",
+        "primary": 0.5311205983161926,
+        "parent_id": 0,
+        "visits": 2,
+        "depth": 1,
+        "children": [
+          2
+        ],
+        "status": "success"
+      },
+      "2": {
+        "id": 2,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_124515/trial_002/model.py",
+        "hypothesis": "Implement Censored regression for watch time on top of the parent model and evaluate it. See the 'censored-regression' entry in the method corpus for the implementation details and the conditions under which it does not help.",
+        "primary": 0.5978573560714722,
+        "parent_id": 1,
+        "visits": 2,
+        "depth": 2,
+        "children": [
+          3
+        ],
+        "status": "success"
+      },
+      "3": {
+        "id": 3,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_124515/trial_003/model.py",
+        "hypothesis": "FM + listwise-softmax loss (softmax over user's impressions, cross-entropy on ranking pairs) with same field set, k=16, same optimizer/schedule",
+        "primary": 0.5995641946792603,
+        "parent_id": 2,
+        "visits": 2,
+        "depth": 3,
+        "children": [
+          4
+        ],
+        "status": "success"
+      },
+      "4": {
+        "id": 4,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_124515/trial_004/model.py",
+        "hypothesis": "FM + listwise-softmax with negative sampling (sample 5–10 negatives per positive per user impression) to reduce computational cost",
+        "primary": 0.6031042337417603,
+        "parent_id": 3,
+        "visits": 2,
+        "depth": 4,
+        "children": [
+          5
+        ],
+        "status": "success"
+      },
+      "5": {
+        "id": 5,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_124515/trial_005/model.py",
+        "hypothesis": "FM + listwise-softmax with temperature scaling (τ=0.1 to 1.0) to control softmax concentration on relevant items",
+        "primary": 0.46931999921798706,
+        "parent_id": 4,
+        "visits": 2,
+        "depth": 5,
+        "children": [
+          6
+        ],
+        "status": "success"
+      },
+      "6": {
+        "id": 6,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_124515/trial_006/model.py",
+        "hypothesis": "FM + listwise-softmax with user-history attention: for each user, compute attention weights over their recent k=10 impressions (ranked by recency), concatenate weighted embedding sum to user input, retrain with trial_004's negative sampling strategy",
+        "primary": 0.5952064990997314,
+        "parent_id": 5,
+        "visits": 2,
+        "depth": 6,
+        "children": [
+          7
+        ],
+        "status": "success"
+      },
+      "7": {
+        "id": 7,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_124515/trial_007/model.py",
+        "hypothesis": "FM + listwise-softmax with DIN-style attention: replace user_id embedding with user_id + attention-weighted sum of recent item embeddings (video_id + author_id), keeping loss and negative sampling from trial_004",
+        "primary": 0.5707589387893677,
+        "parent_id": 6,
+        "visits": 2,
+        "depth": 7,
+        "children": [
+          8
+        ],
+        "status": "success"
+      },
+      "8": {
+        "id": 8,
+        "code_path": "/Users/bviveka/Desktop/tiktok/TikTokTechJam_STierCo/experiment_workspace/20260830_124515/trial_008/model.py",
+        "hypothesis": "Implement ESMM: two towers (click tower = FM with listwise-softmax, watch-time tower = FM with MSE on duration), combined loss = α·click_loss + (1-α)·watch_time_loss, train jointly; evaluate α ∈ {0.5, 0.7, 0.9}",
+        "primary": 0.5608259439468384,
+        "parent_id": 7,
+        "visits": 1,
+        "depth": 8,
+        "children": [],
+        "status": "success"
+      }
+    }
+  }
+}

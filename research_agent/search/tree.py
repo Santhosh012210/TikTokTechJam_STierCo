@@ -62,6 +62,14 @@ class SearchTree:
             raise RuntimeError("All nodes are rejected — cannot select")
         return max(candidates, key=lambda n: self.ucb_score(n, C))
 
+    def visit(self, node_id: int) -> None:
+        """Record that this node was chosen as a branch point by select().
+        Called every time a node is used as the parent for a new trial —
+        this is what makes the UCB exploration term actually differentiate
+        over-exploited nodes from under-explored ones, instead of every
+        node converging to the same visits=1 forever."""
+        self._nodes[node_id].visits += 1
+
     # ------------------------------------------------------------------
     # Mutation
     # ------------------------------------------------------------------

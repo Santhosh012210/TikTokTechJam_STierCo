@@ -83,15 +83,43 @@ MANDATORY model.py CONTRACT — violating any rule = failure
    a = ap.parse_args()
    splits = load(a.data_dir)
 
-3. TRAIN ON splits['train'] ONLY.
-   SCORE splits['valid'] ONLY.
-   NEVER access splits['test'] — this will be detected and rejected.
+3. TRAIN ON splits['train'] ONLY. SCORE splits['valid'] ONLY.
+   Do NOT unpack, evaluate, or return test-split results anywhere in your
+   code, even as an extra diagnostic alongside valid results. The test
+   split does not exist for the purposes of this task — do not reference
+   enc['test'] or splits['test'] under any circumstance, in any function,
+   for any reason. This will be detected and the entire trial rejected.
 
-4. Print EXACTLY ONE JSON line to stdout at the end:
-   print(json.dumps(evaluate(users_valid, labels_valid, scores_valid)))
+4. Before considering your implementation done, run it via run_bash EARLY —
+   after your first working draft, not after building the full implementation.
+   Verify it executes and produces the correct JSON output before adding any
+   further refinements. Do not spend your full turn budget writing code you
+   never execute.
+   CONSEQUENCE: if you end the session without a run_bash call that actually
+   completes and prints the metrics JSON line, your trial is recorded as
+   FAILED with no score — even if the code looks correct. Writing correct
+   code is not enough; you must observe the printed metrics yourself in the
+   run_bash tool output before finishing.
 
-5. Use seed={config.SEED} for all randomness (numpy default_rng({config.SEED})).
-6. Must complete in under 5 minutes.
+5. Print EXACTLY ONE JSON line to stdout at the end. evaluate() returns numpy
+   float32 values, which json.dumps() cannot serialize directly — always wrap
+   every value in float() first:
+   result = evaluate(users_valid, labels_valid, scores_valid)
+   print(json.dumps({{k: float(v) for k, v in result.items()}}))
+
+6. Use seed={config.SEED} for all randomness (numpy default_rng({config.SEED})).
+7. Must complete in under 5 minutes.
+8. Vectorize all gradient computations using numpy array operations
+   (e.g. np.add.at for scatter-accumulate over indices). Do NOT use Python
+   for-loops over individual training pairs, individual features, OR
+   individual users — any of these will be too slow to finish within the
+   time limit on this dataset size (train split has 1.1M+ rows across
+   tens of thousands of users). If your hypothesis requires user-grouped
+   sampling (e.g. BPR pairs), build the pair/sample arrays for ALL users
+   in one vectorized pass (e.g. using numpy grouping, np.split on a sorted
+   user-id array, or precomputed index arrays), then run the training step
+   on fixed-size mini-batches drawn from that combined pool — never call
+   a training step once per user inside a Python loop.
 
 ════════════════════════════════════════════════
 CONTEXT
@@ -148,7 +176,7 @@ def _run_session(
     for _turn in range(config.BUILDER_MAX_TURNS):
         try:
             response: LLMResponse = client.complete(
-                messages, tools=BUILDER_TOOLS, max_tokens=4096
+                messages, tools=BUILDER_TOOLS, max_tokens=8192
             )
         except Exception as e:
             last_error = f"API error: {e}"
@@ -194,6 +222,30 @@ def _run_session(
         else:
             last_error = f"Unexpected stop_reason: {response.stop_reason}"
             break
+
+    # Safety net: the model wrote code but never verified it ran. Try once,
+    # ourselves, before giving up — this is not a retry loop, just one
+    # last honest check so a correct trial isn't lost to a skipped run_bash call.
+    if metrics is None and final_code is not None:
+        mp = candidate_dir / "model.py"
+        if not mp.exists() or mp.read_text(encoding="utf-8") != final_code:
+            mp.write_text(final_code, encoding="utf-8")
+        fallback_output = dispatch_tool_call(
+            "run_bash",
+            {
+                "command": f'{config.PYTHON_EXE} model.py --data_dir "{config.DATA_DIR}"',
+                "timeout_seconds": 240,
+            },
+            candidate_dir,
+            config.BASELINE_ROOT,
+        )
+        if is_error_output(fallback_output):
+            last_error = fallback_output[:500]
+        else:
+            last_stdout = fallback_output
+            found = try_extract_metrics(fallback_output)
+            if found:
+                metrics = found
 
     return BuilderResult(
         success=metrics is not None,

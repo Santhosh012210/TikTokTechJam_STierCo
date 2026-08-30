@@ -165,15 +165,16 @@ def check_convergence(history: list[float], epsilon: float, N: int) -> bool:
 # ---------------------------------------------------------------------------
 
 _COMPONENT_KEYWORDS: list[tuple[str, str]] = [
-    ("bpr",       "loss"),
-    ("listwise",  "loss"),
-    ("softmax",   "loss"),
-    ("pairwise",  "loss"),
     ("din",       "architecture"),
     ("sim",       "architecture"),
     ("attention", "architecture"),
     ("deepfm",    "architecture"),
     ("dcn",       "architecture"),
+    ("sequence",  "architecture"),
+    ("bpr",       "loss"),
+    ("listwise",  "loss"),
+    ("softmax",   "loss"),
+    ("pairwise",  "loss"),
     ("multi-task","multi-task"),
     ("auxiliary", "multi-task"),
     ("multitask", "multi-task"),
@@ -181,7 +182,6 @@ _COMPONENT_KEYWORDS: list[tuple[str, str]] = [
     ("censored",  "features"),
     ("temporal",  "features"),
     ("hourmin",   "features"),
-    ("sequence",  "features"),
 ]
 
 
@@ -365,6 +365,7 @@ def main() -> None:
     corpus_methods = list_methods()
     method_catalogue = available_methods()
     method_idx = 0   # cursor into the corpus, used only when the Strategist is silent
+    explored_categories: set[str] = set()
 
     run_start = time.time()
 
@@ -401,6 +402,7 @@ def main() -> None:
                 hypothesis_history=hypothesis_history[-20:],
                 dead_ends=KNOWN_DEAD_ENDS,
                 untried_directions=method_catalogue,
+                explored_categories=sorted(explored_categories),
                 current_best=tree._best_primary,
                 config=config,
             )
@@ -422,6 +424,7 @@ def main() -> None:
 
         # Select parent via UCB
         parent_node = tree.select(C=config.UCB_C)
+        tree.visit(parent_node.id)
         parent_code_path = parent_node.code_path
         parent_code = (
             Path(parent_code_path).read_text(encoding="utf-8")
@@ -488,6 +491,7 @@ def main() -> None:
 
         # Update tree and history AFTER write
         tree.update(child_node.id, primary=new_primary or -1.0, status=status)
+        explored_categories.add(log_row["target_component"])
         primary_history.append(new_primary if new_primary is not None else primary_history[-1])
         hypothesis_history.append({
             "iteration": iteration,

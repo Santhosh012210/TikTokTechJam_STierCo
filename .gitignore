@@ -26,3 +26,5 @@ datasets/KuaiRand-1k/
 datasets/KuaiRand-27k/
 datasets/*.tar.gz
 datasets/*.zip
+CWM_BASELINE/
+starter_kit/

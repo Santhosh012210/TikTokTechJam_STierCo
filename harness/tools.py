@@ -72,8 +72,8 @@ BUILDER_TOOLS = [
                 },
                 "timeout_seconds": {
                     "type": "integer",
-                    "description": "Max runtime in seconds (default 300).",
-                    "default": 300,
+                    "description": "Max runtime in seconds (default 240).",
+                    "default": 240,
                 },
             },
             "required": ["command"],
@@ -173,7 +173,10 @@ def exec_run_bash(
                 return (
                     "REJECTED: test-set access detected in model.py. "
                     f"Violations: {violations}. "
-                    "Remove any access to splits['test'] or enc['test'] and retry."
+                    "Remove any access to splits['test'] or enc['test'], then you MUST run "
+                    "model.py again via run_bash to confirm it now executes successfully and "
+                    "prints valid metrics before finishing. Do not end the session without "
+                    "re-running it."
                 )
 
         # Build subprocess environment: full PATH, PYTHONPATH set, no API key
@@ -228,7 +231,7 @@ def dispatch_tool_call(
         elif tool_name == "run_bash":
             return exec_run_bash(
                 tool_input["command"],
-                int(tool_input.get("timeout_seconds", 300)),
+                int(tool_input.get("timeout_seconds", 240)),
                 candidate_dir,
                 starter_kit_root,
             )
