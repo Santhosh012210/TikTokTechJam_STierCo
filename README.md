@@ -61,7 +61,7 @@ log are not exposed to candidate processes.
 | `harness/agent_main.py` | Single-agent run entrypoint — deterministic baseline, budgets, convergence, evidence |
 | `research_agent/adk_agent.py` | Google ADK agent, persistent session, callbacks, event tracing, and tool adapters |
 | `harness/agent_tools.py` | Constrained agent tools — train/valid EDA, literature search, file editing, model execution |
-| `harness/hooks.py` | Provider-independent lifecycle hooks; `model.py` saves get an immediate syntax check |
+| `harness/hooks.py` | Provider-independent lifecycle hooks; `model.py` saves get an immediate syntax check and failed saves gate execution |
 | `harness/main.py` + Builder/Strategist | Previous multi-session architecture retained temporarily for comparison |
 | `research_agent/knowledge/` | Local method corpus + offline BM25 `search_ml_literature` tool |
 | `harness/adk_config.py` | Native Gemini/Google ADK configuration with legacy Gemini-env compatibility |

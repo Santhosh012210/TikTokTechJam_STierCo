@@ -101,6 +101,58 @@ def test_model_post_file_save_hook_stays_silent_after_valid_save():
         assert result == "OK: wrote 10 bytes to model.py"
 
 
+def test_run_model_skips_after_failed_save_until_model_is_repaired():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp) / "experiment_workspace" / "run_001" / "trial_001"
+        trial.mkdir(parents=True)
+        trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        runtime = AgentToolRuntime(trial, config, BootstrapState(required=False))
+        execute_calls: list[Path] = []
+        original_execute_model = agent_tools_module.execute_model
+
+        def fake_execute_model(candidate_dir, _config):
+            execute_calls.append(candidate_dir)
+            return agent_tools_module.ModelExecution(
+                True,
+                {"GAUC": 0.61, "nDCG@5": 0.60, "primary": 0.605},
+                "",
+                None,
+                0.01,
+            )
+
+        agent_tools_module.execute_model = fake_execute_model
+        try:
+            failed_save = runtime.dispatch(
+                "write_file", {"path": "model.py", "content": "def broken(:\n"}
+            )
+            skipped = json.loads(runtime.dispatch("run_model", {
+                "hypothesis": "Exercise the failed-save gate",
+                "reasoning": "A queued execution must not run invalid Python.",
+            }))
+
+            assert failed_save.startswith("FAILED:")
+            assert not skipped["success"]
+            assert skipped["skipped"]
+            assert skipped["wall_seconds"] == 0.0
+            assert skipped["error"].startswith("SKIPPED:")
+            assert execute_calls == []
+
+            repaired_save = runtime.dispatch(
+                "write_file", {"path": "model.py", "content": "value = 2\n"}
+            )
+            executed = json.loads(runtime.dispatch("run_model", {
+                "hypothesis": "Exercise the repaired-save gate",
+                "reasoning": "A successful save must re-enable execution.",
+            }))
+
+            assert repaired_save.startswith("OK:")
+            assert executed["success"]
+            assert execute_calls == [trial]
+        finally:
+            agent_tools_module.execute_model = original_execute_model
+
+
 def test_fixed_organizer_date_splits_and_counts_are_pinned():
     assert classify_date(20220408) == "train"
     assert classify_date(20220421) == "train"

@@ -495,6 +495,7 @@ class AgentToolRuntime:
         self.config = config
         self.bootstrap_state = bootstrap_state or BootstrapState()
         self.executions: list[dict] = []
+        self.model_post_save_failed = False
         self.inherited_model_fingerprint = semantic_model_fingerprint(
             candidate_dir / "model.py"
         )
@@ -579,7 +580,16 @@ class AgentToolRuntime:
         if name == "write_file":
             if not self.bootstrap_state.complete:
                 return self._bootstrap_rejection("write_file")
-            return exec_write_file(payload["path"], payload["content"], self.candidate_dir)
+            result = exec_write_file(
+                payload["path"], payload["content"], self.candidate_dir
+            )
+            target = (self.candidate_dir / str(payload["path"])).resolve()
+            if target == (self.candidate_dir / "model.py").resolve():
+                if result.startswith("FAILED:"):
+                    self.model_post_save_failed = True
+                elif result.startswith("OK:"):
+                    self.model_post_save_failed = False
+            return result
         if name == "inspect_data":
             summary = inspect_train_valid_data(self.config)
             self.bootstrap_state.data_inspected = True
@@ -735,6 +745,24 @@ class AgentToolRuntime:
                 semantic_model_fingerprint(self.candidate_dir / "model.py")
                 != self.inherited_model_fingerprint
             )
+            if self.model_post_save_failed:
+                error = (
+                    "SKIPPED: model.py failed its PostFileSave check. Fix and save "
+                    "model.py successfully before calling run_model again."
+                )
+                record = {
+                    "hypothesis": str(payload.get("hypothesis", "")),
+                    "reasoning": str(payload.get("reasoning", "")),
+                    "literature_chunk_ids": list(payload.get("literature_chunk_ids", [])),
+                    "success": False,
+                    "metrics": None,
+                    "error": error,
+                    "wall_seconds": 0.0,
+                    "candidate_changed": candidate_changed,
+                    "skipped": True,
+                }
+                self.executions.append(record)
+                return json.dumps(record, ensure_ascii=False, indent=2)
             if not candidate_changed:
                 error = (
                     "REJECTED: model.py is semantically unchanged from the inherited "
