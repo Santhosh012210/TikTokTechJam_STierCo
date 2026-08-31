@@ -240,6 +240,15 @@ Submission validation: `{check_output.strip()}`
 
 The trusted finalizer generated row-aligned hidden-split predictions but did not compute or expose
 hidden-test metrics to the research agent.
+
+## Task definition
+
+The brief's judging criteria mention `click` / NDCG@10 / Recall@50, while the checked-in Starter
+Kit (`evaluate.py`, `baseline_scores.json`, its README, and the brief's own line 74) defines the
+target as `long_view` scored by GAUC and nDCG@5. This entry was built to the **Starter Kit** as the
+executable authority the submission is checked against -- a deliberate reading of an internally
+inconsistent brief, not an oversight. `--task-definition-confirmed` records that this reading was
+made intentionally.
 """
     (final_dir / "final-report.md").write_text(report, encoding="utf-8")
     return final_metrics
