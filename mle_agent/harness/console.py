@@ -25,9 +25,30 @@ _YELLOW = "\033[33m"
 _RED = "\033[31m"
 
 
+def _make_stream_encoding_tolerant(stream: TextIO) -> None:
+    """Stop a decorative glyph from aborting a run on a non-UTF-8 stdout.
+
+    Windows consoles and redirected pipes often default to cp1252, which cannot
+    encode the box-drawing characters this console prints. Prefer UTF-8; fall
+    back to replacing unencodable characters rather than raising.
+    """
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    current = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
+    try:
+        if current not in {"utf8", "utf16", "utf32"}:
+            reconfigure(encoding="utf-8", errors="replace")
+        else:
+            reconfigure(errors="replace")
+    except (ValueError, OSError):  # pragma: no cover - platform-dependent
+        pass
+
+
 class RunConsole:
     def __init__(self, stream: TextIO | None = None, use_color: bool | None = None) -> None:
         self.stream = stream or sys.stdout
+        _make_stream_encoding_tolerant(self.stream)
         if use_color is None:
             use_color = (
                 "NO_COLOR" not in os.environ
