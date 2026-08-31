@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import csv
+import difflib
 import hashlib
 import json
 import os
@@ -25,6 +26,8 @@ try:  # POSIX-only; absent on Windows, where os.times() is used instead.
 except ImportError:  # pragma: no cover - platform-dependent
     resource = None
 
+from pydantic import ValidationError as PydanticValidationError
+
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
@@ -39,296 +42,198 @@ from mle_agent.harness.run_environment import (
     AUTO_INSTALL_ALLOWLIST,
     snapshot_run_environment,
 )
+from mle_agent.harness.tool_schemas import (
+    OPTIONAL_TOOL_ARGS_MODELS,
+    TARGET_COMPONENTS,
+    TOOL_ARGS_MODELS,
+    tool_spec,
+)
 from mle_agent.harness.tools import exec_edit_file, exec_write_file, redact_secrets
 from mle_agent.harness.validator import scan_candidate_source
 from mle_agent.research_agent.knowledge import SEARCH_ML_LITERATURE_TOOL, search_ml_literature
 
 
+# Every tool description lives here; every tool *schema* is derived from the
+# Pydantic model in tool_schemas.py. Keeping the prose next to the tool list and
+# the shape next to the validator is deliberate: the description is what the
+# agent reads, the model is what the harness enforces, and neither can drift
+# into a second hand-maintained copy of the other.
+_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "discover_task_docs": (
+        "Discover the task README and important benchmark-support files in the official "
+        "starter kit. Call this once at the start of the first experiment."
+    ),
+    "read_file": (
+        "Read one explicit page from the current candidate or an official starter-kit file. "
+        "Continue from next_offset until complete=true; content is never silently truncated."
+    ),
+    "write_file": "Create or replace a file inside the current candidate directory.",
+    "edit_file": (
+        "Make one exact old-text replacement in a candidate file. Prefer this over a full "
+        "rewrite for focused changes; the old text must match exactly once."
+    ),
+    "inspect_data": (
+        "Return a deterministic EDA summary and candidate-data column inventory made only "
+        "from the training and validation view. The hidden test dates are never summarized."
+    ),
+    "query_data": (
+        "Run one bounded aggregate query over train or validation. Returns at most 20 "
+        "grouped rows and never returns raw interaction rows. Use only to resolve a "
+        "specific uncertainty left by inspect_data."
+    ),
+    "inspect_environment": (
+        "Inspect the Python runtime and available open-source ML frameworks without importing "
+        "or installing them. Required during bootstrap so framework choice is evidence-based."
+    ),
+    "request_dependency_install": (
+        "Request installation of missing PyPI packages into the run's Python environment. "
+        "Allowlisted ML packages install automatically as binary wheels in the dedicated run "
+        "venv. Off-allowlist packages require explicit user approval. Every outcome is logged; "
+        "URLs, extras, markers, and pip flags are rejected."
+    ),
+    "reproduce_baseline": (
+        "Execute the unchanged inherited baseline candidate after reading the task README, "
+        "baseline, evaluation, feature/data, feature-ablation, and model code. Verifies the "
+        "official validation score before research."
+    ),
+    "record_task_context": (
+        "Record the structured benchmark understanding after fully reading the required "
+        "sources, inspecting data, and searching the literature. The stored summary remains "
+        "available to every later experiment."
+    ),
+    "record_research_backlog": (
+        "Record the ranked, evidence-backed research plan after record_task_context. "
+        "Provide 6 to 10 candidate families; the first three must target distinct "
+        "pipeline components. Required to complete bootstrap."
+    ),
+    "run_model": (
+        "Execute the current model.py against train and validation only. "
+        "Provide the hypothesis and evidence behind this experiment for the run log. "
+        "Returns validation metrics or a traceback to repair."
+    ),
+}
+
+_TOOL_DESCRIPTIONS["run_sweep"] = (
+    "Score 2-6 data-only hyperparameter configurations of the current model.py in "
+    "one experiment. Counts as one convergence turn but one scored variant per "
+    "config. Use only when the hypothesis is genuinely about a configuration range."
+)
+
 AGENT_TOOLS = [
-    {
-        "name": "discover_task_docs",
-        "description": (
-            "Discover the task README and important benchmark-support files in the official "
-            "starter kit. Call this once at the start of the first experiment."
-        ),
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "read_file",
-        "description": (
-            "Read one explicit page from the current candidate or an official starter-kit file. "
-            "Continue from next_offset until complete=true; content is never silently truncated."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "offset": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "description": "Character offset to start at (default 0).",
-                },
-                "max_chars": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Requested page size, capped by the harness read limit.",
-                },
-            },
-            "required": ["path"],
-        },
-    },
-    {
-        "name": "write_file",
-        "description": "Create or replace a file inside the current candidate directory.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "content": {"type": "string"},
-            },
-            "required": ["path", "content"],
-        },
-    },
-    {
-        "name": "edit_file",
-        "description": (
-            "Make one exact old-text replacement in a candidate file. Prefer this over a full "
-            "rewrite for focused changes; the old text must match exactly once."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "old_text": {"type": "string"},
-                "new_text": {"type": "string"},
-            },
-            "required": ["path", "old_text", "new_text"],
-        },
-    },
-    {
-        "name": "inspect_data",
-        "description": (
-            "Return a deterministic EDA summary and candidate-data column inventory made only "
-            "from the training and validation view. The hidden test dates are never summarized."
-        ),
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "query_data",
-        "description": (
-            "Run one bounded aggregate query over train or validation. Returns at most 20 "
-            "grouped rows and never returns raw interaction rows. Use only to resolve a "
-            "specific uncertainty left by inspect_data."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "split": {"type": "string", "enum": ["train", "validation"]},
-                "group_by": {
-                    "type": "array", "maxItems": 2,
-                    "items": {"type": "string"},
-                },
-                "metrics": {
-                    "type": "array", "minItems": 1, "maxItems": 5,
-                    "items": {"type": "string"},
-                },
-                "filters": {"type": "array", "maxItems": 3, "items": {"type": "object"}},
-                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
-            },
-            "required": ["split", "metrics"],
-        },
-    },
-    {
-        "name": "inspect_environment",
-        "description": (
-            "Inspect the Python runtime and available open-source ML frameworks without importing "
-            "or installing them. Required during bootstrap so framework choice is evidence-based."
-        ),
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "request_dependency_install",
-        "description": (
-            "Request installation of missing PyPI packages into the run's Python environment. "
-            "Allowlisted ML packages install automatically as binary wheels in the dedicated run "
-            "venv. Off-allowlist packages require explicit user approval. Every outcome is logged; "
-            "URLs, extras, markers, and pip flags are rejected."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "packages": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "One to six PyPI requirement specifiers, such as lightgbm or torch==2.8.0.",
-                },
-                "justification": {
-                    "type": "string",
-                    "description": "Why these packages are necessary for the current research hypothesis.",
-                },
-            },
-            "required": ["packages", "justification"],
-        },
-    },
-    SEARCH_ML_LITERATURE_TOOL,
-    {
-        "name": "reproduce_baseline",
-        "description": (
-            "Execute the unchanged inherited baseline candidate after reading the task README, "
-            "baseline, evaluation, feature/data, feature-ablation, and model code. Verifies the "
-            "official validation score before research."
-        ),
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "record_task_context",
-        "description": (
-            "Record the structured benchmark understanding after fully reading the required "
-            "sources, inspecting data, and searching the literature. The stored summary remains "
-            "available to every later experiment."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "task_objective": {"type": "string"},
-                "target_label": {"type": "string"},
-                "metrics": {"type": "array", "items": {"type": "string"}},
-                "data_splits": {
-                    "type": "object",
-                    "properties": {
-                        "train": {"type": "string"},
-                        "validation": {"type": "string"},
-                        "test": {"type": "string"},
-                    },
-                    "required": ["train", "validation", "test"],
-                },
-                "baseline": {"type": "string"},
-                "evaluation_protocol": {"type": "array", "items": {"type": "string"}},
-                "hard_constraints": {"type": "array", "items": {"type": "string"}},
-                "known_dead_ends": {"type": "array", "items": {"type": "string"}},
-                "promising_directions": {"type": "array", "items": {"type": "string"}},
-                "feature_engineering_context": {
-                    "type": "object",
-                    "properties": {
-                        "baseline_fields": {"type": "array", "items": {"type": "string"}},
-                        "measured_dead_ends": {"type": "array", "items": {"type": "string"}},
-                        "promising_feature_families": {"type": "array", "items": {"type": "string"}},
-                        "leakage_controls": {"type": "array", "items": {"type": "string"}},
-                        "implementation_boundary": {"type": "string"},
-                    },
-                    "required": [
-                        "baseline_fields",
-                        "measured_dead_ends",
-                        "promising_feature_families",
-                        "leakage_controls",
-                        "implementation_boundary",
-                    ],
-                },
-                "candidate_contract": {"type": "array", "items": {"type": "string"}},
-                "source_paths": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": [
-                "task_objective",
-                "target_label",
-                "metrics",
-                "data_splits",
-                "baseline",
-                "evaluation_protocol",
-                "hard_constraints",
-                "known_dead_ends",
-                "promising_directions",
-                "feature_engineering_context",
-                "candidate_contract",
-                "source_paths",
-            ],
-        },
-    },
-    {
-        "name": "run_model",
-        "description": (
-            "Execute the current model.py against train and validation only. "
-            "Provide the hypothesis and evidence behind this experiment for the run log. "
-            "Returns validation metrics or a traceback to repair."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "hypothesis": {
-                    "type": "string",
-                    "description": "The precise model or pipeline change being tested.",
-                },
-                "reasoning": {
-                    "type": "string",
-                    "description": "Why the change may improve the ranking metrics, grounded in data/history/literature.",
-                },
-                "literature_chunk_ids": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Relevant chunk IDs returned by search_ml_literature.",
-                },
-                "target_component": {
-                    "type": "string",
-                    "enum": [
-                        "loss",
-                        "sampling",
-                        "features",
-                        "sequence",
-                        "auxiliary-task",
-                        "model",
-                        "training",
-                        "evaluation",
-                    ],
-                    "description": "Primary component changed: loss, sampling, features, sequence, auxiliary-task, model, or training.",
-                },
-                "expected_effect": {
-                    "type": "string",
-                    "description": "Expected effect on the official metrics and why.",
-                },
-                "falsification_criterion": {
-                    "type": "string",
-                    "description": "Metric result that would reject the hypothesis.",
-                },
-                "rollback_plan": {
-                    "type": "string",
-                    "description": "How to return to the incumbent if the experiment fails.",
-                },
-                "seed": {
-                    "type": "integer",
-                    "description": "Reproducible training seed; defaults to the official seed.",
-                },
-                "trial_config": {
-                    "type": "object",
-                    "description": "Candidate-declared data-only hyperparameter configuration.",
-                },
-                "execution_class": {
-                    "type": "string",
-                    "enum": ["quick", "normal", "substantial"],
-                    "description": (
-                        "Propose an execution budget: 'quick' for a diagnostic, 'normal' for "
-                        "an ordinary candidate, 'substantial' for a framework-backed run. The "
-                        "harness decides the actual limit and may clamp it to the wall budget."
-                    ),
-                },
-                "feature_sources": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Candidate-data columns or train-derived histories used by a feature-oriented experiment.",
-                },
-                "feature_transformations": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Exact joins, buckets, crosses, aggregates, or sequence transformations being tested.",
-                },
-                "leakage_controls": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "How every fitted statistic avoids validation labels and future information.",
-                },
-            },
-            "required": ["hypothesis", "reasoning", "target_component"],
-        },
-    },
+    tool_spec(name, model, _TOOL_DESCRIPTIONS[name])
+    for name, model in TOOL_ARGS_MODELS.items()
+] + [SEARCH_ML_LITERATURE_TOOL]
+
+#: Registered on top of AGENT_TOOLS only when the sweep flag is on.
+OPTIONAL_AGENT_TOOLS = [
+    tool_spec(name, model, _TOOL_DESCRIPTIONS[name])
+    for name, model in OPTIONAL_TOOL_ARGS_MODELS.items()
 ]
+
+#: Tool name -> argument model, for payload validation inside dispatch.
+_TOOL_ARGS_MODELS = {**TOOL_ARGS_MODELS, **OPTIONAL_TOOL_ARGS_MODELS}
+
+
+def sanity_check_metrics(
+    metrics: dict | None, config: Config
+) -> dict[str, object] | None:
+    """Flag a scored candidate whose result indicates a broken build.
+
+    A candidate holding every baseline feature and more that cannot beat ranking
+    by global item popularity has almost certainly failed to learn, rather than
+    having tested its hypothesis and lost. Returning this alongside the metrics
+    matters because the agent otherwise writes a confident, wrong reflection: in
+    run 20260831_134234 a BPR candidate scored GAUC 0.522 against 0.499 for
+    random scoring -- it had trained on (negative, negative) pairs and never seen
+    a positive -- and the agent concluded "the BPR objective is not competitive",
+    retiring one of the README's named research directions on the strength of a
+    single-line indexing bug.
+    """
+    if not metrics:
+        return None
+    primary = float(metrics.get("primary", 0.0))
+    if primary > config.POPULARITY_PRIMARY:
+        return None
+    return {
+        "verdict": "SUSPECT_IMPLEMENTATION",
+        "scored_primary": round(primary, 6),
+        "observed_gauc": round(float(metrics.get("GAUC", 0.0)), 6),
+        "reference_rungs": {
+            "random_scoring": round(config.RANDOM_PRIMARY, 6),
+            "item_popularity": round(config.POPULARITY_PRIMARY, 6),
+            "official_fm_baseline": round(config.BASELINE_PRIMARY, 6),
+        },
+        "why": (
+            "This candidate scored at or below a trivial item-popularity ranker "
+            "while having the baseline's features and more. That is evidence the "
+            "code did not learn, not evidence the hypothesis is wrong."
+        ),
+        "required_next_step": (
+            "Do not conclude that the research direction failed. Diagnose the "
+            "implementation first: verify the training signal actually reaches the "
+            "model (label balance in the batches, the sign of the gradient, that "
+            "positives are present at all), then either fix and re-run, or state "
+            "explicitly which check ruled out a bug."
+        ),
+        "common_causes": [
+            "training pairs or labels selected with an inverted index",
+            "positives filtered out before the training loop",
+            "gradient sign or update direction reversed",
+            "predictions written in a different row order than the evaluation split",
+        ],
+    }
+
+
+def summarize_change(parent_source: str, candidate_source: str) -> dict[str, object]:
+    """Describe this experiment's change as a diff against the inherited candidate.
+
+    The unit of work is a diff, not a file. An experiment that rewrites model.py
+    wholesale cannot attribute its score to anything: run 20260831_134234's first
+    experiment replaced the file in one 6,497-character write bundling three
+    feature families, and its own reflection conceded the result supported them
+    only "as a bundle". Reporting hunk count and rewrite-vs-edit back to the agent
+    makes that visible while it can still act on it, instead of only to a reader
+    of the log afterwards.
+    """
+    parent_lines = parent_source.splitlines()
+    candidate_lines = candidate_source.splitlines()
+    diff = list(difflib.unified_diff(
+        parent_lines, candidate_lines, lineterm="", n=0,
+    ))
+    hunks = sum(1 for line in diff if line.startswith("@@"))
+    added = sum(
+        1 for line in diff if line.startswith("+") and not line.startswith("+++")
+    )
+    removed = sum(
+        1 for line in diff if line.startswith("-") and not line.startswith("---")
+    )
+    # A change that replaces most of what it inherited is a rewrite regardless of
+    # which tool produced it, and rewrites are where attribution is lost.
+    denominator = max(1, len(parent_lines))
+    rewrite = removed >= 0.6 * denominator and len(parent_lines) > 20
+    summary: dict[str, object] = {
+        "hunks": hunks,
+        "lines_added": added,
+        "lines_removed": removed,
+        "parent_lines": len(parent_lines),
+        "is_rewrite": rewrite,
+    }
+    if rewrite:
+        summary["attribution_warning"] = (
+            f"This experiment replaced {removed} of {len(parent_lines)} inherited "
+            "lines. A wholesale rewrite bundles every change together, so a score "
+            "move cannot be attributed to any one of them. Prefer edit_file for a "
+            "targeted change; if a full replacement is genuinely required (a "
+            "different model family, say), say so in the reflection and treat the "
+            "result as evidence about the bundle rather than about one idea."
+        )
+    elif hunks > 6:
+        summary["attribution_warning"] = (
+            f"This experiment changed {hunks} separate regions. A score move "
+            "cannot be attributed to any single one. State in the reflection "
+            "which regions the conclusion actually rests on."
+        )
+    return summary
 
 
 @dataclass
@@ -612,10 +517,9 @@ def _repeats_measured_dead_end(payload: dict, proposal: dict) -> str | None:
     return None
 
 
-RUN_MODEL_COMPONENTS = (
-    "loss", "sampling", "features", "sequence", "auxiliary-task",
-    "model", "training", "evaluation",
-)
+# Single definition, shared with the run_model / backlog schemas so the diversity
+# gate can never compare against a list the agent was not actually shown.
+RUN_MODEL_COMPONENTS = TARGET_COMPONENTS
 
 
 def _validate_research_backlog(candidates: object) -> list[str]:
@@ -1160,6 +1064,7 @@ class AgentToolRuntime:
         run_deadline: float | None = None,
         iteration: int = 0,
         experiments_remaining: int | None = None,
+        failed_fingerprints: set[str] | None = None,
     ) -> None:
         self.candidate_dir = candidate_dir
         self.config = config
@@ -1179,9 +1084,19 @@ class AgentToolRuntime:
         self.data_query_events: list[dict[str, object]] = []
         self._data_query_cache: dict[str, dict[str, object]] = {}
         self.executions: list[dict] = []
+        # Candidate digests already measured as non-improving in earlier runs.
+        # Identical code cannot score differently, so re-running one is waste.
+        self.failed_fingerprints = set(failed_fingerprints or ())
         self.model_post_save_failed = False
         self.inherited_model_fingerprint = semantic_model_fingerprint(
             candidate_dir / "model.py"
+        )
+        # The parent this experiment must be attributable against, captured before
+        # the agent touches anything.
+        inherited = candidate_dir / "model.py"
+        self.inherited_model_source = (
+            inherited.read_text(encoding="utf-8", errors="replace")
+            if inherited.is_file() else ""
         )
         if self.bootstrap_state.required_candidate_model_path is None:
             self.bootstrap_state.required_candidate_model_path = str(
@@ -1258,7 +1173,123 @@ class AgentToolRuntime:
         self.bootstrap_state.rejected_actions.append(record)
         return json.dumps({"success": False, **record}, ensure_ascii=False, indent=2)
 
+    # record_research_backlog counts its own rejections and deliberately accepts a
+    # degraded backlog on the fourth attempt, so that a malformed plan cannot stall
+    # bootstrap forever. A schema rejection at this boundary would return before the
+    # counter advanced and turn that bounded ladder into an infinite loop.
+    # run_sweep validates each config's keys against a data-only allowlist, which
+    # a dict[str, Any] schema cannot express. Splitting trial_configs validation
+    # across two layers is exactly the drift the Pydantic schemas removed, so the
+    # dispatch owns all of it; the schema still carries the 2-6 bound as guidance
+    # the model sees before it calls.
+    _OWNS_ITS_VALIDATION = frozenset({"record_research_backlog", "run_sweep"})
+
+    def _validate_payload(self, name: str, payload: dict) -> dict | str:
+        """Coerce a tool payload through its Pydantic model.
+
+        Returns the validated payload, or a JSON error string to hand straight
+        back to the agent. Defaults declared on the model are materialised here,
+        so dispatch below can read fields directly instead of re-deriving each
+        default with payload.get(..., fallback).
+        """
+        if name in self._OWNS_ITS_VALIDATION:
+            return dict(payload)
+        model = _TOOL_ARGS_MODELS.get(name)
+        if model is None:
+            return dict(payload)
+        try:
+            return model.model_validate(payload).model_dump()
+        except PydanticValidationError as exc:
+            errors = [
+                {
+                    "field": ".".join(str(part) for part in error["loc"]) or "(root)",
+                    "problem": error["msg"],
+                }
+                for error in exc.errors()[:8]
+            ]
+            record = {
+                "success": False,
+                "error": "TOOL_ARGUMENT_INVALID",
+                "tool": name,
+                "invalid_fields": errors,
+            }
+            self.bootstrap_state.rejected_actions.append({
+                "action": name,
+                "error": "TOOL_ARGUMENT_INVALID",
+                "invalid_fields": errors,
+            })
+            return json.dumps(record, ensure_ascii=False, indent=2)
+
+    # Tools whose prerequisite gate must be reported before their arguments are
+    # checked. If the agent has not yet read the sources, "you have not read the
+    # sources" is the actionable error; a field-level complaint about the payload
+    # it should not be sending yet would send it off to fix the wrong thing.
+    _GATE_BEFORE_VALIDATION = frozenset({
+        "write_file",
+        "edit_file",
+        "run_model",
+        "run_sweep",
+        "request_dependency_install",
+        "record_task_context",
+        "record_research_backlog",
+        "reproduce_baseline",
+        "query_data",
+    })
+
+    def _gate_rejection(self, name: str) -> str | None:
+        """Return the prerequisite rejection for ``name``, or None if it may run."""
+        if name in {
+            "write_file", "edit_file", "run_model", "run_sweep",
+            "request_dependency_install",
+        } and not self.bootstrap_state.complete:
+            return self._bootstrap_rejection(name)
+        if name == "query_data" and not self.bootstrap_state.data_inspected:
+            return json.dumps({
+                "success": False,
+                "error": "EDA_REQUIRED: call inspect_data before query_data",
+            }, ensure_ascii=False, indent=2)
+        if name == "reproduce_baseline":
+            missing = self.bootstrap_state.missing_baseline_prerequisites()
+            if missing:
+                self.bootstrap_state.rejected_actions.append({
+                    "action": "reproduce_baseline",
+                    "error": "BASELINE_CONTEXT_REQUIRED",
+                    "missing_requirements": missing,
+                })
+                return json.dumps({
+                    "success": False,
+                    "error": "BASELINE_CONTEXT_REQUIRED",
+                    "missing_requirements": missing,
+                    "metrics": None,
+                    "wall_seconds": 0.0,
+                }, ensure_ascii=False, indent=2)
+        if name in {"record_task_context", "record_research_backlog"}:
+            missing = self.bootstrap_state.missing_requirements(before_context=True)
+            if name == "record_research_backlog" and self.bootstrap_state.task_context is None:
+                missing = missing + ["record the structured task context"]
+            if missing:
+                error = (
+                    "BOOTSTRAP_SOURCES_INCOMPLETE" if name == "record_task_context"
+                    else "TASK_CONTEXT_REQUIRED"
+                )
+                record = {
+                    "action": name,
+                    "error": error,
+                    "missing_requirements": missing,
+                }
+                self.bootstrap_state.rejected_actions.append(record)
+                return json.dumps({"success": False, **record}, ensure_ascii=False, indent=2)
+        return None
+
     def dispatch(self, name: str, payload: dict) -> str:
+        if name in self._GATE_BEFORE_VALIDATION:
+            rejection = self._gate_rejection(name)
+            if rejection is not None:
+                return rejection
+        validated = self._validate_payload(name, payload)
+        if isinstance(validated, str):
+            return validated
+        payload = validated
         if name == "discover_task_docs":
             documents, primary_readme = _discover_task_documents(self.config.BASELINE_ROOT)
             self.bootstrap_state.discovery_completed = True
@@ -1308,9 +1339,10 @@ class AgentToolRuntime:
                     str(payload["path"]), self.candidate_dir, self.config.BASELINE_ROOT
                 )
                 content = path.read_text(encoding="utf-8", errors="replace")
-                offset = max(0, int(payload.get("offset", 0)))
+                offset = max(0, int(payload.get("offset", 0) or 0))
+                requested = payload.get("max_chars")
                 requested_chars = int(
-                    payload.get("max_chars", self.config.AGENT_READ_MAX_CHARS)
+                    self.config.AGENT_READ_MAX_CHARS if requested is None else requested
                 )
                 page_size = max(1, min(requested_chars, self.config.AGENT_READ_MAX_CHARS))
                 if offset > len(content):
@@ -1894,10 +1926,7 @@ class AgentToolRuntime:
                 self.candidate_dir / "model.py"
             )
             candidate_changed = candidate_fingerprint != self.inherited_model_fingerprint
-            allowed_components = {
-                "loss", "sampling", "features", "sequence", "auxiliary-task",
-                "model", "training", "evaluation",
-            }
+            allowed_components = set(RUN_MODEL_COMPONENTS)
             target_component = str(payload.get("target_component", "")).strip().lower()
             if target_component not in allowed_components:
                 record = {
@@ -1961,6 +1990,27 @@ class AgentToolRuntime:
                     "error": error,
                     "wall_seconds": 0.0,
                     "candidate_changed": False,
+                }
+                self.executions.append(record)
+                return json.dumps(record, ensure_ascii=False, indent=2)
+
+            if candidate_fingerprint in self.failed_fingerprints:
+                record = {
+                    "hypothesis": str(payload.get("hypothesis", "")),
+                    "reasoning": str(payload.get("reasoning", "")),
+                    "literature_chunk_ids": list(payload.get("literature_chunk_ids", [])),
+                    "proposal": proposal,
+                    "success": False,
+                    "metrics": None,
+                    "error": (
+                        "REJECTED: this exact candidate was already scored in an earlier "
+                        "run of this agent and did not improve the incumbent. Identical "
+                        "code cannot produce a different score. See the cross-run "
+                        "experiment history for the measured outcome, and test a change "
+                        "that differs in substance."
+                    ),
+                    "wall_seconds": 0.0,
+                    "candidate_changed": True,
                 }
                 self.executions.append(record)
                 return json.dumps(record, ensure_ascii=False, indent=2)
@@ -2065,7 +2115,9 @@ class AgentToolRuntime:
                 return json.dumps(record, ensure_ascii=False, indent=2)
 
             execution_class = str(payload.get("execution_class", "normal"))
-            requested_seed = int(payload.get("seed", self.config.SEED))
+            requested_seed = int(
+                self.config.SEED if payload.get("seed") is None else payload["seed"]
+            )
             trial_config = payload.get("trial_config")
             if trial_config is not None and not isinstance(trial_config, dict):
                 record = {
@@ -2112,8 +2164,20 @@ class AgentToolRuntime:
                 "error": execution.error,
                 "wall_seconds": execution.wall_seconds,
                 "candidate_changed": True,
+                # Carried so the cross-run history can gate an identical
+                # repeat in a later run, not just within this one.
+                "candidate_fingerprint": candidate_fingerprint,
                 "seed": execution.seed,
                 "trial_config": execution.trial_config,
+                "sanity_check": sanity_check_metrics(
+                    execution.metrics, self.config
+                ),
+                "change_summary": summarize_change(
+                    self.inherited_model_source,
+                    (self.candidate_dir / "model.py").read_text(
+                        encoding="utf-8", errors="replace"
+                    ),
+                ),
                 "prediction_path": execution.prediction_path,
                 "prediction_sha256": execution.prediction_sha256,
                 "resource_usage": execution.resource_usage,
@@ -2125,10 +2189,15 @@ class AgentToolRuntime:
                 self.bootstrap_state.seen_candidate_fingerprints.add(
                     candidate_fingerprint
                 )
-                self.bootstrap_state.scored_experiments.append({
-                    "iteration": self.iteration,
-                    "target_component": target_component,
-                })
+                # A candidate that never learned has not actually tested its
+                # component, so it must not consume one of the three distinct
+                # slots the diversity gate requires. Crediting it would let a bug
+                # spend the run's one budgeted attempt at a whole direction.
+                if record["sanity_check"] is None:
+                    self.bootstrap_state.scored_experiments.append({
+                        "iteration": self.iteration,
+                        "target_component": target_component,
+                    })
             return json.dumps(record, ensure_ascii=False, indent=2)
         if name == "run_sweep":
             return self._dispatch_run_sweep(payload)
@@ -2219,7 +2288,9 @@ class AgentToolRuntime:
                 payload, "WALL_BUDGET_EXHAUSTED: not enough scored-variant budget left for a sweep"
             )
         sweep_id = uuid.uuid4().hex
-        requested_seed = int(payload.get("seed", self.config.SEED))
+        requested_seed = int(
+            self.config.SEED if payload.get("seed") is None else payload["seed"]
+        )
         execution_class = str(payload.get("execution_class", "normal"))
         members: list[dict] = []
         for index in range(cap):

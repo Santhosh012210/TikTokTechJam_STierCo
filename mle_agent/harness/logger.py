@@ -63,6 +63,11 @@ class RunLogger:
         return self._llm_events_path
 
     @property
+    def logs_dir(self) -> Path:
+        """Where the JSONL traces live; blob references are relative to this."""
+        return self._logs_dir
+
+    @property
     def run_dir(self) -> Path:
         return self._run_dir
 

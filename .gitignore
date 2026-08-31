@@ -22,6 +22,11 @@ temp/
 # The README stays tracked so the evidence layout is documented in the repo.
 artifacts/runs/*
 !artifacts/runs/README.md
+
+# Content-addressed sidecar for bulky trace payloads. Written per run under
+# RUN_RESEARCH_DIR; this catches the fallback location used when no run
+# directory is configured (offline tests).
+artifacts/blobs/
 src/test_run*
 experiment_workspace/
 

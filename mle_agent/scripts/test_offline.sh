@@ -12,6 +12,6 @@ fi
 
 cd "$repo_dir"
 "$python_exe" -m mle_agent.tests.test_agent_sdk
-"$python_exe" -m mle_agent.tests.test_adk_agent
+"$python_exe" -m mle_agent.tests.test_memory_and_prefetch
 "$python_exe" -m mle_agent.tests.test_knowledge
 "$repo_dir/mle_agent/scripts/check_starter_kit.sh"

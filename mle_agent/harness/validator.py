@@ -164,6 +164,8 @@ AGENT_V2_EXTRA: dict[str, type | tuple] = {
     "schema_version": int,
     "code_diff_reason": (str, type(None)),
     "hypothesis_supported": (bool, type(None)),
+    "hypothesis_status": (str,),
+    "implementation_diagnosis": (str,),
     "suggested_next": str,
 }
 

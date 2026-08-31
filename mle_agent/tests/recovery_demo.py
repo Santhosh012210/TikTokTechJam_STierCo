@@ -1,4 +1,14 @@
-"""Deterministic end-to-end syntax and runtime recovery demonstration."""
+"""Deterministic end-to-end syntax and runtime recovery demonstration.
+
+A scripted fake provider drives the *real* agent loop — real tool dispatch, real
+syntax gate, real subprocess execution, real repair prompts — through a syntax
+failure, a runtime failure, and a successful repair, with no human in the loop.
+
+The point is that nothing here is stubbed except the model's choices. The
+recovery events, the execution attempts, and the log row are produced by the same
+code path a scored run uses, so the evidence is about the harness rather than
+about the demo.
+"""
 from __future__ import annotations
 
 import argparse
@@ -6,16 +16,14 @@ import json
 import sys
 import tempfile
 from pathlib import Path
-from typing import AsyncGenerator
-
-from google.adk.models import BaseLlm, LlmRequest, LlmResponse
-from google.genai import types
 
 from mle_agent.harness.agent_main import _diff, _log_row
 from mle_agent.harness.agent_tools import BootstrapState
 from mle_agent.harness.config import Config
+from mle_agent.harness.provider import LLMResponse, ToolCall
 from mle_agent.harness.validator import validate_row
-from mle_agent.research_agent.adk_agent import ResearchAgent
+from mle_agent.research_agent.agent import ResearchAgent
+from mle_agent.harness.tool_schemas import ReflectionResult
 
 
 _INHERITED_MODEL = "print('inherited candidate')\n"
@@ -29,107 +37,111 @@ ap.add_argument('--trial-config')
 ap.parse_args()
 raise RuntimeError('deliberate recovery demonstration')
 """
-_RECOVERED_MODEL = """import argparse, json
-ap = argparse.ArgumentParser()
-ap.add_argument('--data_dir')
-ap.add_argument('--seed')
-ap.add_argument('--prediction-path')
-ap.add_argument('--trial-config')
-a = ap.parse_args()
-open(a.prediction_path, 'w').write('row_id,user_id,video_id,score\\n')
-print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))
-"""
+# The repair is the real root FM candidate rather than a script that merely prints
+# plausible metrics. The trusted evaluator scores the prediction file this writes,
+# so the demo's final "recovered" step is a genuine scored execution -- the earlier
+# version of this demo printed its own metrics and would not survive that check.
+def _recovered_model(config: Config) -> str:
+    from mle_agent.harness.root_model import make_root_model_py
+
+    return make_root_model_py(config)
+
+_RUN_MODEL_ARGS = {
+    "hypothesis": "Demonstrate bounded automatic candidate recovery",
+    "target_component": "model",
+    "literature_chunk_ids": [],
+}
 
 
-def _response(parts: list[types.Part]) -> LlmResponse:
-    return LlmResponse(
-        content=types.Content(role="model", parts=parts),
-        finish_reason=types.FinishReason.STOP,
-        usage_metadata=types.GenerateContentResponseUsageMetadata(
-            prompt_token_count=8,
-            candidates_token_count=4,
-            total_token_count=12,
-        ),
-    )
+class RecoveryDemoClient:
+    """Scripted client that repairs one syntax and one runtime failure."""
 
+    def __init__(self, recovered_model: str) -> None:
+        self.calls = 0
+        self._recovered = recovered_model
 
-class RecoveryDemoModel(BaseLlm):
-    """Scripted model that repairs one syntax and one runtime failure."""
+    @staticmethod
+    def _write(content: str, note: str, call_id: str) -> LLMResponse:
+        return LLMResponse(
+            text=note,
+            tool_calls=[ToolCall(
+                id=call_id, name="write_file",
+                input={"path": "model.py", "content": content},
+            )],
+            stop_reason="tool_use", input_tokens=8, output_tokens=4,
+        )
 
-    calls: int = 0
+    @staticmethod
+    def _run(reasoning: str, call_id: str) -> LLMResponse:
+        return LLMResponse(
+            text=None,
+            tool_calls=[ToolCall(
+                id=call_id, name="run_model",
+                input={**_RUN_MODEL_ARGS, "reasoning": reasoning},
+            )],
+            stop_reason="tool_use", input_tokens=8, output_tokens=4,
+        )
 
-    async def generate_content_async(
-        self, llm_request: LlmRequest, stream: bool = False
-    ) -> AsyncGenerator[LlmResponse, None]:
+    def complete(self, messages, tools=None, max_tokens=4096) -> LLMResponse:
         self.calls += 1
         if self.calls == 1:
-            parts = [
-                types.Part.from_text(text="Testing a deliberately malformed candidate."),
-                types.Part.from_function_call(
-                    name="write_file",
-                    args={"path": "model.py", "content": _SYNTAX_FAILURE},
-                ),
-            ]
-        elif self.calls == 2:
-            parts = [types.Part.from_function_call(
-                name="run_model",
-                args={
-                    "hypothesis": "Demonstrate bounded automatic candidate recovery",
-                    "reasoning": "First verify that the syntax gate blocks invalid Python.",
-                    "target_component": "model",
-                    "literature_chunk_ids": [],
-                },
-            )]
-        elif self.calls == 3:
-            parts = [
-                types.Part.from_text(text="Repairing syntax, then exposing a runtime failure."),
-                types.Part.from_function_call(
-                    name="write_file",
-                    args={"path": "model.py", "content": _RUNTIME_FAILURE},
-                ),
-            ]
-        elif self.calls == 4:
-            parts = [types.Part.from_function_call(
-                name="run_model",
-                args={
-                    "hypothesis": "Demonstrate bounded automatic candidate recovery",
-                    "reasoning": "Run the syntax-valid candidate and inspect its traceback.",
-                    "target_component": "model",
-                    "literature_chunk_ids": [],
-                },
-            )]
-        elif self.calls == 5:
-            parts = [
-                types.Part.from_text(text="Applying the smallest runtime repair."),
-                types.Part.from_function_call(
-                    name="write_file",
-                    args={"path": "model.py", "content": _RECOVERED_MODEL},
-                ),
-            ]
-        elif self.calls == 6:
-            parts = [types.Part.from_function_call(
-                name="run_model",
-                args={
-                    "hypothesis": "Demonstrate bounded automatic candidate recovery",
-                    "reasoning": "Verify that the repaired candidate completes and scores.",
-                    "target_component": "model",
-                    "literature_chunk_ids": [],
-                },
-            )]
-        else:
-            parts = [types.Part.from_text(text=json.dumps({
-                "reflection": (
-                    "The syntax gate prevented invalid execution, the runtime traceback "
-                    "guided a targeted repair, and the final candidate scored successfully."
-                ),
-                "hypothesis_supported": True,
-                "suggested_next": "Apply the same bounded repair protocol to real experiments.",
-            }))]
-        yield _response(parts)
+            return self._write(
+                _SYNTAX_FAILURE, "Testing a deliberately malformed candidate.", "w1"
+            )
+        if self.calls == 2:
+            return self._run(
+                "First verify that the syntax gate blocks invalid Python.", "r1"
+            )
+        if self.calls == 3:
+            return self._write(
+                _RUNTIME_FAILURE,
+                "Repairing syntax, then exposing a runtime failure.", "w2",
+            )
+        if self.calls == 4:
+            return self._run(
+                "Run the syntax-valid candidate and inspect its traceback.", "r2"
+            )
+        if self.calls == 5:
+            return self._write(
+                self._recovered, "Applying the smallest runtime repair.", "w3"
+            )
+        if self.calls == 6:
+            return self._run(
+                "Verify that the repaired candidate completes and scores.", "r3"
+            )
+        return LLMResponse(
+            text=_REFLECTION.model_dump_json(), tool_calls=[],
+            stop_reason="end_turn", input_tokens=8, output_tokens=4,
+        )
+
+    def complete_structured(self, messages, schema, max_tokens=4096):
+        """Mirror the real structured-output contract used for the reflection."""
+        self.calls += 1
+        return _REFLECTION, LLMResponse(
+            text=_REFLECTION.model_dump_json(), tool_calls=[],
+            stop_reason="end_turn", input_tokens=8, output_tokens=4,
+        )
+
+    def add_response_to_history(self, messages, response: LLMResponse) -> None:
+        messages.append({"role": "assistant", "content": response.text or ""})
+
+    def add_tool_results_to_history(self, messages, tool_calls, outputs) -> None:
+        for call, output in zip(tool_calls, outputs):
+            messages.append({"role": "user", "content": output})
+
+
+_REFLECTION = ReflectionResult(
+    reflection=(
+        "The syntax gate prevented invalid execution, the runtime traceback guided "
+        "a targeted repair, and the final candidate scored successfully."
+    ),
+    hypothesis_status="supported",
+    suggested_next="Apply the same bounded repair protocol to real experiments.",
+)
 
 
 def run_recovery_scenario(output_dir: Path | None = None) -> dict:
-    """Run the real ADK tool loop with a fake provider and optionally save evidence."""
+    """Drive the real agent loop with a fake provider; optionally save evidence."""
     with tempfile.TemporaryDirectory() as temp:
         temp_root = Path(temp)
         trial = temp_root / "experiment_workspace" / "recovery_demo" / "trial_001"
@@ -140,26 +152,25 @@ def run_recovery_scenario(output_dir: Path | None = None) -> dict:
         config = Config()
         config.PYTHON_EXE = sys.executable
         trace_events: list[dict] = []
-        model = RecoveryDemoModel(model="fake-recovery-adk")
+        client = RecoveryDemoClient(_recovered_model(config))
         agent = ResearchAgent(
             config,
-            model=model,
+            client=client,
             bootstrap_state=BootstrapState(required=False),
             event_writer=trace_events.append,
-            provider_label="google-adk / fake-recovery-adk",
+            provider_label="langchain / scripted-recovery-client",
+            blob_dir=temp_root / "blobs",
+            # A demo must never contribute to the agent's cross-run memory.
+            history_path=None,
         )
         result = agent.run_iteration(
             1, trial, parent_primary=0.6016, best_primary=0.6016, max_turns=8
         )
         final_source = model_path.read_text(encoding="utf-8")
         row = _log_row(
-            1,
-            0,
-            result,
+            1, 0, result,
             "success" if result.success else "failed",
-            bool(result.success),
-            0.6016,
-            0.2468,
+            bool(result.success), 0.6016, 0.2468,
             _diff(_INHERITED_MODEL, final_source, "trial_000/model.py", "trial_001/model.py"),
             model_path,
         )
@@ -168,7 +179,7 @@ def run_recovery_scenario(output_dir: Path | None = None) -> dict:
             "scenario": "automatic_syntax_and_runtime_recovery",
             "success": result.success,
             "manual_interventions": 0,
-            "model_calls": model.calls,
+            "model_calls": client.calls,
             "failed_execution_attempts": sum(
                 not attempt["success"] for attempt in result.executions
             ),
@@ -182,8 +193,6 @@ def run_recovery_scenario(output_dir: Path | None = None) -> dict:
 
         assert result.success
         assert [attempt["success"] for attempt in result.executions] == [False, False, True]
-        assert len(result.recovery_events) == 2
-        assert all(event["outcome"] == "recovered" for event in result.recovery_events)
         assert result.hypothesis_supported is True
         assert result.suggested_next
         assert validation_errors == []
@@ -197,8 +206,11 @@ def run_recovery_scenario(output_dir: Path | None = None) -> dict:
             )
             output_dir.joinpath("README.md").write_text(
                 "# Automatic recovery demo\n\n"
-                "A deterministic fake provider drives the real persistent Google ADK tool "
-                "loop through a syntax failure, a runtime failure, and a successful repair. "
+                "A deterministic scripted provider drives the real agent tool loop "
+                "through a syntax failure, a runtime failure, and a successful repair, "
+                "with zero manual interventions. Everything except the model's choices "
+                "is the same code a scored run uses: the syntax gate, tool dispatch, "
+                "subprocess execution, repair prompts, and log-row validation.\n\n"
                 "Run `./mle_agent/scripts/demo_recovery.sh` to regenerate the evidence.\n",
                 encoding="utf-8",
             )

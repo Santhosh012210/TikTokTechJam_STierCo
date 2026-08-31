@@ -5,10 +5,6 @@ numpy
 # user-approved runtime installation. URLs, markers, and pip flags are rejected.
 packaging>=24
 
-# Active autonomous agent runtime. Google ADK owns the persistent session,
-# model/tool loop, callbacks, and events; Gemini inference is configured with
-# GOOGLE_API_KEY and ADK_MODEL.
-google-adk>=2.8.0,<3
 
 # Legacy Builder/Strategist comparison runner providers.
 # Anthropic provider (`LLM_PROVIDER=anthropic`).
@@ -21,5 +17,19 @@ anthropic
 # - Ollama OpenAI-compatible local endpoint (`LLM_PROVIDER=ollama`)
 openai
 
+# LangChain supplies the model adapter (init_chat_model), unified usage/cache
+# accounting, Pydantic-derived tool schemas, with_structured_output for the
+# closing reflection, and trim_messages as the primitive under the harness's
+# phase-aware memory policy.
+#
+# Deliberately NOT used: LangGraph and create_agent (the harness owns the loop,
+# its state machine, and its retry, all of which must stay auditable); the
+# client's own max_retries (it would multiply billed calls underneath the cost
+# gate); with_fallbacks (a silent model swap mid-run would invalidate the
+# scientific comparison between experiments); and LangSmith tracing (all traces
+# stay local).
+langchain>=1.0,<2
+langchain-openai>=1.0,<2
+
 # No separate `groq` or `ollama` package is needed for the legacy runner; it
-# uses their OpenAI-compatible endpoints. Google ADK installs `google-genai`.
+# uses their OpenAI-compatible endpoints.

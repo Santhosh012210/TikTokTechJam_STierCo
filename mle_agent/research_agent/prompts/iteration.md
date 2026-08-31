@@ -7,7 +7,7 @@ Begin experiment `${iteration}` now.
 
 `${stage_instruction}`
 
-Compact prior experiment ledger (empty on experiment 1):
+Compact prior experiment ledger, built by the harness from validated results (empty on experiment 1). This survives context compaction, so trust it over your recollection of earlier turns:
 
 ```json
 ${experiment_ledger}
@@ -19,6 +19,24 @@ evidence):
 ```json
 ${research_plan}
 ```
+
+Experiments already measured in earlier runs of this agent. The harness refuses an
+identical candidate outright; re-testing the same idea with a different implementation
+is allowed only if you state what the earlier attempt got wrong:
+
+```json
+${cross_run_history}
+```
+
+Verified development-run frontier available to this run:
+
+```json
+${prior_experiment_evidence}
+```
+
+Use it as prior evidence, not as an official incumbent. Do not repeat its exact experiment sequence
+or repeat the old report's incorrect BPR attribution; reproduce or extend it through an attributable
+change and fresh trusted scoring.
 
 Experiments 1-3 must each target a distinct `target_component`. The harness refuses a repeat before
 three distinct components have been scored unless you pass `diversity_override` with a written,
@@ -46,6 +64,23 @@ with the narrow package list and a concrete justification.
 Known-good ML packages resolve automatically as binary wheels inside the dedicated run venv;
 off-allowlist packages require user approval. Continue only after the harness reports the dependency
 installed. Never invoke pip from `model.py`.
+
+Work in diffs, not rewrites. You inherit the incumbent `model.py`; change it with
+`edit_file` so the experiment is a targeted, attributable delta against that parent.
+`run_model` reports a `change_summary` with the hunk count and whether your change
+replaced the file, and the harness records the resulting diff as the experiment's
+evidence. A wholesale rewrite, or a change scattered across many regions, bundles
+several ideas into one score and makes the result unattributable to any of them --
+if the metric moves you will not know which part moved it. A full replacement is
+legitimate when the hypothesis genuinely requires one (a different model family, a
+framework-backed candidate); in that case say so, and report the result as evidence
+about the bundle rather than about a single change.
+
+If `run_model` returns a `sanity_check`, your candidate scored at or below a trivial
+item-popularity ranker. Treat that as a broken implementation until you have shown
+otherwise: diagnose it, and if you cannot rule out a bug, set `hypothesis_status` to
+`not_tested` rather than `not_supported`. An untested idea must not be recorded as a
+refuted one -- that retires a research direction nobody actually tried.
 
 Feature engineering uses the filtered `candidate_data` passed through `--data_dir`; never rewrite
 the raw CSVs. Keep every scored feature pipeline self-contained in `model.py`. Do not repeat the

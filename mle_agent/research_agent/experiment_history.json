@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "status": "harness_written_operational_log_not_verified_evidence",
+  "note": "Every row was produced by the harness from a validated execution. Cite prior_experiments.json, not this file, for verified scores.",
+  "rows": [
+    {
+      "run_id": "20260831_134234",
+      "iteration": 1,
+      "hypothesis": "A controlled pointwise-BCE FM with train-only smoothed item/user long_view rate buckets, calendar-date context, and train user-count buckets improves within-user ranking over the five-field reference, reproducing the verified frontier without attributing it to BPR or optimizer changes.",
+      "target_component": "features",
+      "outcome": "improved",
+      "primary": 0.6040620124323418,
+      "delta_vs_incumbent": 0.002208,
+      "incumbent_primary": 0.601854,
+      "candidate_fingerprint": "0ead8d497d31f68c539098f5d2ca91fefbcc33cc2e3c887766a4616df4070ce5",
+      "reflection": "Supported. The controlled train-only feature bundle achieved primary 0.604062 (+0.002208 over 0.601854), exceeding the 0.002 noise threshold and the verified prior frontier (0.603718). Both GAUC (0.671090) and nDCG@5 (0.537034) improved. Runtime was 23.3s, with moderate memory use. This supports train-derived item/user rate, activity, and date-context signals as a bundle, but does not isolate indi",
+      "error": "",
+      "recorded_at": "2026-08-31T14:35:10.907296Z"
+    },
+    {
+      "run_id": "20260831_134234",
+      "iteration": 2,
+      "hypothesis": "Replacing pointwise BCE with deterministic same-user BPR positive-negative updates on the validated frozen train-only feature FM will improve within-user pair ordering, especially GAUC, and may lift the primary score beyond 0.604062.",
+      "target_component": "loss",
+      "outcome": "suspect_implementation",
+      "primary": 0.49938030156597957,
+      "delta_vs_incumbent": -0.104682,
+      "incumbent_primary": 0.604062,
+      "candidate_fingerprint": "3c93886590858630e012e53a1e7adb2a5b4a11713546ac4cd77c2311f39bed96",
+      "reflection": "Rejected decisively. Deterministic same-user BPR training scored primary 0.499380 (GAUC 0.522289, nDCG@5 0.476472), a -0.104682 decline from the matched BCE feature incumbent 0.604062. This is far beyond the 0.002 noise threshold, so the BPR implementation/objective with one sampled negative per positive and inherited optimization schedule is not competitive. Runtime remained practical at 24.1s, b",
+      "error": "Pair construction was invalid: avalues() was unpacked so p came from the negatives slot, producing (negative, negative) training pairs. The run never supplied a positive example to the BPR loss. Retry with explicit positive and negative arrays plus assertions that y[p] == 1, y[n] == 0, p != n, and both score branches receive nonzero gradients.",
+      "recorded_at": "2026-08-31T14:35:10.907819Z"
+    },
+    {
+      "run_id": "20260831_134234",
+      "iteration": 3,
+      "hypothesis": "A DIN-style candidate-conditioned attention model over each user’s causal training exposure-video prefix will improve within-user long_view ordering beyond static FM features by representing recent behavioral interests.",
+      "target_component": "sequence",
+      "outcome": "rejected",
+      "primary": 0.5968188387937181,
+      "delta_vs_incumbent": -0.007243,
+      "incumbent_primary": 0.604062,
+      "candidate_fingerprint": "89febd57278db2b3211dd9ad41c5425a3d236122075e8ffdf945f901a1fd3f1f",
+      "reflection": "Rejected. The causal exposure-only DIN candidate scored primary 0.596819 (GAUC 0.660479, nDCG@5 0.533159), declining 0.007243 from the 0.604062 engineered BCE-FM incumbent—well beyond the 0.002 threshold. The leakage-safe train-prefix implementation was practical (32.7s wall time) but materially larger in memory (~1.23GB); unlabelled exposure history alone does not outperform the static train-deri",
+      "error": "",
+      "recorded_at": "2026-08-31T14:35:10.908159Z"
+    },
+    {
+      "run_id": "20260831_161310",
+      "iteration": 1,
+      "hypothesis": "A controlled pointwise-BCE FM consolidation of train-only smoothed item/user long_view-rate buckets, hour context, and user-count bucket can reproduce or exceed the verified 0.603718 frontier; isolate this coherent feature set before attributing any extension, since the retained prior source confirms BCE rather than BPR and confounds individual feature effects.",
+      "target_component": "features",
+      "outcome": "rejected",
+      "primary": 0.6005219960493339,
+      "delta_vs_incumbent": -0.001332,
+      "incumbent_primary": 0.601854,
+      "candidate_fingerprint": "1e84bc1c939dbb7ece47224c90c335594a7789602ef1a1fa41e31450049e291e",
+      "reflection": "The controlled feature consolidation scored primary 0.600522, down 0.001332 from the reproduced five-field FM (0.601854) and well below the verified prior 0.603718 frontier. This is below the 0.002 convergence threshold but does not reproduce the prior result; the coherent feature bundle is not beneficial under this reconstruction/seed configuration. Runtime increased from about 13.0 s to 19.8 s.",
+      "error": "The candidate trained normally, wrote aligned finite predictions, passed sanity checks, and used explicit train-only aggregates with LOO target-rate construction for train rows. The result is therefore a valid negative test of this particular consolidated implementation, not an infrastructure failur",
+      "recorded_at": "2026-08-31T16:20:44.726406Z"
+    },
+    {
+      "run_id": "20260831_161310",
+      "iteration": 2,
+      "hypothesis": "Correct deterministic same-user positive-negative BPR updates with assertions y[pos]=1, y[neg]=0 and pos!=neg will improve GAUC/primary over pointwise FM because the task ranks only within-user impressions; the earlier BPR result was invalid negative-negative pairing, not a fair test.",
+      "target_component": "loss",
+      "outcome": "improved",
+      "primary": 0.6025439878324161,
+      "delta_vs_incumbent": 0.00069,
+      "incumbent_primary": 0.601854,
+      "candidate_fingerprint": "5e496ec6b0e50c1416a917343bff49a62323dde3271ab070ddc94f918e911113",
+      "reflection": "The corrected BPR implementation achieved primary 0.602544, a +0.000690 lift over the pointwise five-field parent (0.601854). GAUC improved from 0.667431 to 0.668892, while nDCG@5 changed slightly downward from 0.536278 to 0.536196. The run was valid and practical (14.7 s), but the gain is below the required 0.0020 noise threshold.",
+      "error": "The initial repair attempt correctly failed before training because class pools were destructured in the wrong order. The minimal correction reversed that order; the subsequent run passed explicit assertions that every pair has a positive row, a negative row, and distinct indices. It produced aligne",
+      "recorded_at": "2026-08-31T16:22:10.970370Z"
+    },
+    {
+      "run_id": "20260831_161310",
+      "iteration": 3,
+      "hypothesis": "Task-specific MMoE gates over shared categorical embeddings, trained jointly on long_view, is_click, is_like, and is_profile_enter, will use abundant click supervision while preventing auxiliary-task conflict from degrading long-view ranking.",
+      "target_component": "auxiliary-task",
+      "outcome": "improved",
+      "primary": 0.6037212286957577,
+      "delta_vs_incumbent": 0.001177,
+      "incumbent_primary": 0.602544,
+      "candidate_fingerprint": "3829ea42dddd5c43b1c0dad671af1874e62535439a1b9edd56b00b54de95aeba",
+      "reflection": "MMoE multi-task learning achieved primary 0.603721, improving +0.001177 over the BPR parent (0.602544) and +0.001867 over the reproduced pointwise FM baseline (0.601854). Both components improved versus baseline: GAUC 0.670355 and nDCG@5 0.537088. The result approximately matches the verified prior pointwise feature frontier (0.603718) and ran in 16.8 s, but it remains just below the 0.0020 improv",
+      "error": "The candidate successfully trained a seeded PyTorch MMoE with three shared experts, task-specific gates, and four heads. It used only training auxiliary labels in the loss, ranked validation rows solely with the long-view head, restored the checkpoint selected by official validation primary, and emi",
+      "recorded_at": "2026-08-31T16:25:44.753444Z"
+    }
+  ]
+}

@@ -41,24 +41,28 @@ ls datasets/KuaiRand-Pure/data/*.csv | wc -l    # expect 6
 
 Downloaded data is gitignored — never commit the archive or the CSVs.
 
-## 4. Google ADK and Gemini
+## 4. Model provider
 
 ```bash
 cp .env.example .env
 ```
 
-Set `GOOGLE_API_KEY` to a Gemini API key from Google AI Studio. The optional `ADK_MODEL`
-defaults to the low-cost `gemini-3.5-flash-lite` model.
+Set `AGENT_MODEL` to `<provider>:<model-id>` and export that provider's key. The
+provider must appear in the audited capability registry in
+`mle_agent/harness/provider.py`, which records whether it supports strict tool
+schemas, `json_schema` structured output, and cache-read token reporting — a
+provider that silently lacks one of those degrades a run in ways that are hard to
+attribute later, so it must be verified before use, not assumed.
 
-For a non-disruptive migration, an existing Gemini block using `LLM_PROVIDER=gemini`,
-`LLM_API_KEY`, and optional `LLM_MODEL` is also accepted by the ADK runner. The other
-provider blocks remain only for the legacy Builder/Strategist comparison runner.
+The other provider blocks in `.env.example` remain only for the legacy
+Builder/Strategist comparison runner.
 
 `.env` is gitignored. Never commit API keys.
 
-Google ADK now owns the persistent conversation, Gemini function-calling protocol,
-automatic tool loop, and lifecycle callbacks. The Python harness still owns file and data
-boundaries, experiment execution, metric validation, and durable redacted logs.
+The deterministic Python harness owns the loop, phase transitions, memory, retry,
+file and data boundaries, experiment execution, metric validation, and durable
+redacted logs. LangChain supplies only the model adapter, unified usage
+accounting, tool-schema binding, and schema-constrained structured output.
 
 ## 5. Verify
 
@@ -92,7 +96,7 @@ task documentation. If it does not match, the bootstrap stops before experiment 
 ## 6. Run the harness
 
 ```bash
-# single-agent dev run: one persistent Google ADK session owns the complete MLE loop
+# single-agent dev run: one persistent LangChain-backed session owns the complete MLE loop
 ./mle_agent/scripts/run_agent.sh
 
 # one-experiment smoke run: 24 bootstrap calls, 16 experiment calls, 30-minute wall budget
@@ -102,10 +106,10 @@ task documentation. If it does not match, the bootstrap stops before experiment 
 TASK_DEFINITION_CONFIRMED=1 ./mle_agent/scripts/run_official.sh
 ```
 
-The ADK agent defaults to at most 2,048 output tokens per model call, 24 bootstrap calls,
+The agent defaults to at most 2,048 output tokens per model call, 24 bootstrap calls,
 and 16 calls per experiment. Override the output size with
 `AGENT_MAX_OUTPUT_TOKENS`; use `AGENT_READ_MAX_CHARS` to change the constrained file page
-size. Each ADK invocation receives one SDK-managed HTTP retry with exponential backoff
+size. Each model invocation receives exactly one harness-managed retry
 bounded by `PROVIDER_RETRY_DELAY_S` and `RATE_LIMIT_RETRY_DELAY_S`.
 `AGENT_BOOTSTRAP_MAX_TURNS` and `AGENT_MAX_TURNS` can tune the phase budgets but must be
 positive. Budget exhaustion is logged and ends the phase without discarding completed tool work,
@@ -117,7 +121,7 @@ much longer reset interval. Exhausting this bounded recovery stops the run with
 
 If the provider returns a quota/rate-limit error, the terminal asks: `You have hit your
 LLM limit. Would you like to resume when the limit has reset? [y/n]:`. After `y`, the
-harness waits for the advertised retry/reset delay and resumes the retained ADK session.
+harness waits for the advertised retry/reset delay and resumes the retained session.
 Any later quota pauses in the same run wait and resume automatically without asking again.
 Interactive terminals receive colour-coded Agent/Harness debug output; set `NO_COLOR=1`
 to disable it or `FORCE_COLOR=1` to force ANSI colour output. Each Agent block includes
@@ -192,5 +196,5 @@ python -m mle_agent.tests.live_builder_smoke                 # legacy live check
 | `ModuleNotFoundError: No module named 'mle_agent'` | Run from the repository root; no installation is required |
 | `FileNotFoundError: Data directory not found` | `datasets/KuaiRand-Pure/data/` is missing the CSVs — see `datasets/README.md` |
 | Baseline primary outside ±0.002 | Dataset is incomplete or wrong. Re-download; do not proceed |
-| Google ADK API key missing | Set `GOOGLE_API_KEY` in `.env` (or retain the old Gemini `LLM_PROVIDER=gemini` + `LLM_API_KEY` block) |
-| Gemini free-tier rate limit | Answer `y` at the recovery prompt to wait and resume automatically, or `n` to stop with the ADK trace preserved |
+| Provider API key missing | Set the key named by your `AGENT_MODEL` provider's registry entry (for example `OPENAI_API_KEY`) |
+| Provider rate limit | Answer `y` at the recovery prompt to wait and resume automatically, or `n` to stop with the trace preserved |

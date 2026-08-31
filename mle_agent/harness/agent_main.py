@@ -1,4 +1,4 @@
-"""CLI for the Google ADK-backed autonomous MLE loop.
+"""CLI for the autonomous MLE loop.
 
 Usage:
     python -m mle_agent.harness.agent_main --max-iter 3 --wall-hours 0.5 \
@@ -16,18 +16,19 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mle_agent.harness.adk_config import configure_google_adk_environment
 from mle_agent.harness.agent_tools import execute_model
 from mle_agent.harness.config import Config, load_config
 from mle_agent.harness.console import console
 from mle_agent.harness.data_view import prepare_train_valid_view
 from mle_agent.harness.logger import RunLogger
+from mle_agent.harness.provider import make_langchain_client, resolve_langchain_settings
 from mle_agent.harness.root_model import make_root_model_py
 from mle_agent.harness.run_environment import (
     create_run_environment,
     snapshot_run_environment,
 )
-from mle_agent.research_agent.adk_agent import AgentIterationResult, ResearchAgent
+from mle_agent.research_agent.agent import AgentIterationResult, ResearchAgent
+from mle_agent.research_agent.experiment_history import HISTORY_PATH
 
 
 def _now() -> str:
@@ -122,6 +123,8 @@ def _log_row(
         "reasoning": reasoning,
         "reflection": result.reflection,
         "hypothesis_supported": getattr(result, "hypothesis_supported", None),
+        "hypothesis_status": getattr(result, "hypothesis_status", ""),
+        "implementation_diagnosis": getattr(result, "implementation_diagnosis", ""),
         "suggested_next": getattr(result, "suggested_next", ""),
         "execution_attempts": result.executions,
         "recovery_events": recovery_events,
@@ -268,7 +271,7 @@ def _converged(best_history: list[float], epsilon: float, consecutive: int) -> b
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Google ADK-backed KuaiRand MLE research loop"
+        description="Configurable KuaiRand MLE research loop"
     )
     parser.add_argument("--max-iter", type=int, default=3)
     parser.add_argument("--wall-hours", type=float, default=0.5)
@@ -311,7 +314,10 @@ def main() -> None:
     if args.data_dir:
         config.DATA_DIR = Path(args.data_dir).resolve()
     source_data_dir = config.DATA_DIR
-    adk_settings = configure_google_adk_environment()
+    langchain_settings = resolve_langchain_settings()
+    provider_label = (
+        f"langchain / {langchain_settings['provider']} / {langchain_settings['model']}"
+    )
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     workspace = config.EXPERIMENT_WORKSPACE_DIR / run_id
     workspace.mkdir(parents=True, exist_ok=True)
@@ -347,14 +353,14 @@ def main() -> None:
     console.harness(
         "Run setup",
         run_id=run_id,
-        provider=f"google-adk / {adk_settings.model}",
+        provider=provider_label,
         experiment_budget=(
             f"{args.max_iter} experiments, {args.wall_hours}h, "
             f"{experiment_calls} model calls/experiment"
         ),
         bootstrap_budget=f"{bootstrap_calls} model calls (separate from experiments)",
         llm_limits=(
-            f"ADK model output={config.AGENT_MAX_OUTPUT_TOKENS} tokens/call; "
+            f"Model output={config.AGENT_MAX_OUTPUT_TOKENS} tokens/call; "
             f"read page={config.AGENT_READ_MAX_CHARS} chars"
         ),
         candidate_rows=(
@@ -369,13 +375,15 @@ def main() -> None:
     root_path = root_dir / "model.py"
     root_code = make_root_model_py(config)
     root_path.write_text(root_code, encoding="utf-8")
-    provider_label = f"google-adk / {adk_settings.model}"
     agent = ResearchAgent(
         config,
-        model=adk_settings.model,
+        client=make_langchain_client(),
         event_writer=logger.write_llm_event,
         provider_label=provider_label,
-        run_deadline=started + args.wall_hours * 3600,
+        blob_dir=logger.logs_dir / "blobs",
+        run_id=run_id,
+        # A real scored run is the only thing allowed to write cross-run memory.
+        history_path=HISTORY_PATH,
     )
     console.harness(
         "Agent bootstrap",
@@ -412,7 +420,7 @@ def main() -> None:
         )
         failed_results = {
             "run_id": run_id,
-            "architecture": "google_adk_persistent_agent",
+            "architecture": "deterministic_langchain_agent",
             "provider": provider_label,
             "task_definition_confirmed": args.task_definition_confirmed,
             "stop_reason": "bootstrap_failed",
@@ -694,7 +702,7 @@ The candidate loop did not start because the autonomous bootstrap failed. See
     }
     results = {
         "run_id": run_id,
-        "architecture": "google_adk_persistent_agent",
+        "architecture": "deterministic_langchain_agent",
         "provider": provider_label,
         "task_definition_confirmed": args.task_definition_confirmed,
         "stop_reason": stop_reason,
@@ -813,10 +821,10 @@ The candidate loop did not start because the autonomous bootstrap failed. See
 
 ## Architecture
 
-Google ADK owned the persistent session and model/tool event loop across EDA, research,
-hypothesis selection, code, execution, repair, and reflection. The retained Python
-harness enforced budgets, validation-only execution, baseline verification, and evidence
-logging.
+The deterministic Python loop owned phase transitions, phase-aware memory, and retry,
+while LangChain supplied the model adapter, unified usage accounting, Pydantic-derived
+tool schemas, and schema-constrained structured output. The retained Python harness
+enforced budgets, validation-only execution, baseline verification, and evidence logging.
 """)
     logger.close()
     console.harness(

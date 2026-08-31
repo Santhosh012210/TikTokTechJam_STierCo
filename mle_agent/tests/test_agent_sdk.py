@@ -46,10 +46,13 @@ from mle_agent.harness.run_environment import (
 )
 from mle_agent.harness.submission import write_hidden_submission
 from mle_agent.harness.provider import (
+    CostLimitError,
+    LangChainModelClient,
     LLMClient,
     LLMResponse,
     OpenAICompatClient,
     ToolCall,
+    resolve_langchain_settings,
 )
 from mle_agent.harness.tools import exec_write_file
 from mle_agent.harness.validator import scan_candidate_source, validate_row
@@ -70,6 +73,14 @@ def _fake_trusted_scorer(path, *_args, **_kwargs):
         },
         rows=1,
     )
+
+
+
+def _message_text(message: object) -> str:
+    """Content of one history entry, whether it is a dict or a LangChain message."""
+    if isinstance(message, dict):
+        return str(message.get("content", ""))
+    return str(getattr(message, "content", ""))
 
 
 def test_convergence_requires_three_completed_no_gain_experiments():
@@ -127,11 +138,165 @@ def test_candidate_process_does_not_receive_google_api_key():
             os.environ.pop("GOOGLE_API_KEY", None)
         else:
             os.environ["GOOGLE_API_KEY"] = previous
-
     assert result.success
     assert secret not in result.output
     assert "<missing>" in result.output
 
+
+def test_candidate_process_does_not_receive_openai_api_key():
+    config = load_config()
+    secret = "openai-key-must-not-reach-candidate"
+    previous = os.environ.get("OPENAI_API_KEY")
+    try:
+        os.environ["OPENAI_API_KEY"] = secret
+        with tempfile.TemporaryDirectory() as temp:
+            trial = Path(temp)
+            trial.joinpath("model.py").write_text(
+                "import json, os\n"
+                "import argparse\n"
+                "ap=argparse.ArgumentParser(); ap.add_argument('--data_dir'); ap.add_argument('--seed'); "
+                "ap.add_argument('--prediction-path'); ap.add_argument('--trial-config'); a=ap.parse_args()\n"
+                "print(os.environ.get('OPENAI_API_KEY', '<missing>'))\n"
+                "open(a.prediction_path,'w').write('row_id,user_id,video_id,score\\n')\n"
+                "print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))\n"
+            )
+            result = execute_model(trial, config)
+    finally:
+        if previous is None:
+            os.environ.pop("OPENAI_API_KEY", None)
+        else:
+            os.environ["OPENAI_API_KEY"] = previous
+    assert result.success
+    assert secret not in result.output
+    assert "<missing>" in result.output
+
+
+class _FakeLangChainModel:
+    def __init__(self) -> None:
+        self.bound_tools = None
+        self.strict = None
+        self.invocations = 0
+
+    def bind_tools(self, tools, strict=False):
+        self.bound_tools = tools
+        self.strict = strict
+        return self
+
+    def invoke(self, messages, **kwargs):
+        self.invocations += 1
+        return SimpleNamespace(
+            content="",
+            tool_calls=[{
+                "id": "call_1",
+                "name": "inspect_environment",
+                "args": {},
+            }],
+            usage_metadata={
+                "input_tokens": 1000,
+                "output_tokens": 200,
+                "input_token_details": {"cache_read": 100},
+                "output_token_details": {"reasoning": 50},
+            },
+            # Terra's Responses API can mark a response completed even when it
+            # contains a function call; the adapter must still execute the tool.
+            response_metadata={"status": "completed", "id": "resp_1"},
+        )
+
+
+def test_langchain_client_normalizes_tools_memory_usage_and_cost():
+    fake = _FakeLangChainModel()
+    client = LangChainModelClient(
+        model="gpt-5.6-terra",
+        api_key="test-only",
+        reasoning_effort="low",
+        max_cost_usd=1.0,
+        model_instance=fake,
+    )
+    messages = [{"role": "user", "content": "inspect the environment"}]
+    tools = [{
+        "name": "inspect_environment",
+        "description": "Inspect packages.",
+        "parameters": {"type": "object", "properties": {}, "required": []},
+    }]
+    response = client.complete(messages, tools=tools, max_tokens=256)
+    assert fake.strict is True
+    assert fake.bound_tools[0]["function"]["name"] == "inspect_environment"
+    assert response.stop_reason == "tool_use"
+    assert response.tool_calls[0].name == "inspect_environment"
+    assert response.provider_metadata["reasoning_tokens"] == 50
+    assert response.provider_metadata["cached_input_tokens"] == 100
+    # Terra: 900 uncached input at $2/M + 100 cached input at $0.20/M
+    # + 200 output at $12/M = $0.00422.
+    assert abs(client.spent_usd - 0.00422) < 1e-12
+    assert client.spent_usd < client.max_cost_usd
+
+    client.add_response_to_history(messages, response)
+    client.add_tool_results_to_history(messages, response.tool_calls, ["torch available"])
+    assert messages[-2].tool_calls[0]["name"] == "inspect_environment"
+    assert messages[-1].tool_call_id == "call_1"
+
+
+def test_langchain_client_refuses_a_call_that_could_cross_cost_cap():
+    fake = _FakeLangChainModel()
+    client = LangChainModelClient(
+        model="gpt-5.6-terra",
+        api_key="test-only",
+        max_cost_usd=0.00001,
+        model_instance=fake,
+    )
+    try:
+        client.complete([{"role": "user", "content": "hello"}], max_tokens=256)
+        raise AssertionError("the cost gate must refuse the request")
+    except CostLimitError as exc:
+        assert "AGENT_MAX_RUN_COST_USD" in str(exc)
+    assert fake.invocations == 0
+
+
+def test_langchain_settings_disable_external_tracing():
+    names = ("OPENAI_API_KEY", "AGENT_MODEL", "LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2")
+    previous = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["OPENAI_API_KEY"] = "test-only"
+        os.environ["AGENT_MODEL"] = "openai:gpt-5.6-terra"
+        os.environ["LANGSMITH_TRACING"] = "true"
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        settings = resolve_langchain_settings()
+        assert settings["model"] == "gpt-5.6-terra"
+        assert os.environ["LANGSMITH_TRACING"] == "false"
+        assert os.environ["LANGCHAIN_TRACING_V2"] == "false"
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+
+
+def test_langchain_bootstrap_exposes_all_required_state_tools_but_not_mutations():
+    agent = ResearchAgent(
+        load_config(), client=object(), bootstrap_state=BootstrapState(required=False),
+    )
+    names = {tool["name"] for tool in agent._tools_for_phase("bootstrap")}
+    assert "record_task_context" in names
+    assert "record_research_backlog" in names
+    assert not {"write_file", "edit_file", "run_model"} & names
+
+
+def test_sweep_tool_is_registered_only_behind_its_flag():
+    """The default tool surface must match what the run log claims it is."""
+    config = load_config()
+    config.AGENT_ENABLE_SWEEPS = False
+    off = ResearchAgent(
+        config, client=object(), bootstrap_state=BootstrapState(required=False),
+    )
+    assert "run_sweep" not in {t["name"] for t in off._tools_for_phase("experiment")}
+
+    config.AGENT_ENABLE_SWEEPS = True
+    on = ResearchAgent(
+        config, client=object(), bootstrap_state=BootstrapState(required=False),
+    )
+    assert "run_sweep" in {t["name"] for t in on._tools_for_phase("experiment")}
+    config.AGENT_ENABLE_SWEEPS = False
 
 def test_execute_model_resource_usage_survives_without_resource_module():
     """On Windows the POSIX `resource` module is absent; execute_model must still run."""
@@ -808,6 +973,8 @@ def test_iteration_prompt_renders_research_plan():
         parent_primary="0.601600", best_primary="0.601600", max_turns=8,
         stage_instruction="x", experiment_ledger="[]",
         research_plan='[{"hypothesis":"per-user BPR pairwise loss"}]',
+        prior_experiment_evidence='{"evidence_id":"prior-run:test"}',
+        cross_run_history="{}",
     )
     assert "per-user BPR pairwise loss" in rendered.content
 
@@ -894,7 +1061,7 @@ def test_run_sweep_respects_experiments_remaining_cap():
 
 
 def test_emit_sweep_rows_writes_rows_budget_and_counts_tokens_once():
-    from mle_agent.research_agent.adk_agent import AgentIterationResult as ADKResult
+    from mle_agent.research_agent.agent import AgentIterationResult as ADKResult
     with tempfile.TemporaryDirectory() as temp:
         trial = Path(temp)
         (trial / "model.py").write_text(_CHANGED_SCORING_MODEL, encoding="utf-8")
@@ -1341,7 +1508,7 @@ class _FakeClient(LLMClient):
                 output_tokens=5,
             )
         return LLMResponse(
-            text='{"reflection":"The unified loop returned metrics.","hypothesis_supported":true,"suggested_next":"real model"}',
+            text='{"reflection":"The unified loop returned metrics.","hypothesis_status":"supported","suggested_next":"real model"}',
             tool_calls=[],
             stop_reason="end_turn",
             input_tokens=12,
@@ -1459,7 +1626,7 @@ class _BootstrapThenExecuteClient(_FakeClient):
                 stop_reason="tool_use", input_tokens=10, output_tokens=5,
             )
         return LLMResponse(
-            text='{"reflection":"Bootstrap and execution completed.","hypothesis_supported":true,"suggested_next":"continue"}',
+            text='{"reflection":"Bootstrap and execution completed.","hypothesis_status":"supported","suggested_next":"continue"}',
             tool_calls=[], stop_reason="end_turn", input_tokens=8, output_tokens=4,
         )
 
@@ -1503,6 +1670,9 @@ print(json.dumps({'GAUC': 0.6674, 'nDCG@5': 0.5358, 'primary': 0.6016}))
         )
         config.BASELINE_ROOT = starter
         config.AGENT_READ_MAX_CHARS = 400
+        # This test covers the agent-driven bootstrap, which stays supported for
+        # providers or runs where the deterministic prefetch is turned off.
+        config.AGENT_BOOTSTRAP_PREFETCH = False
         client = _BootstrapThenExecuteClient(
             readme, baseline, evaluate, data, feature_ablation, model
         )
@@ -1528,9 +1698,11 @@ print(json.dumps({'GAUC': 0.6674, 'nDCG@5': 0.5358, 'primary': 0.6016}))
         assert result.metrics["primary"] == 0.605
         assert agent.bootstrap_evidence["complete"]
         assert agent.bootstrap_evidence["task_context"]["target_label"] == "long_view"
+        # After bootstrap the conversation is compacted, so the raw tool output is
+        # gone by design. What must survive is the task context itself, re-injected
+        # from validated harness state rather than left in old chat text.
         assert any(
-            "TASK_CONTEXT_RECORDED_AND_RETAINED" in str(message.get("content"))
-            for message in agent.messages
+            "long_view" in _message_text(message) for message in agent.messages
         )
         assert client.calls == 6
 
@@ -1647,7 +1819,7 @@ class _EndEarlyThenExecuteClient(_FakeClient):
                 stop_reason="tool_use", input_tokens=4, output_tokens=2,
             )
         return LLMResponse(
-            text='{"reflection":"Execution happened after protocol recovery.","hypothesis_supported":true,"suggested_next":"continue"}',
+            text='{"reflection":"Execution happened after protocol recovery.","hypothesis_status":"supported","suggested_next":"continue"}',
             tool_calls=[], stop_reason="end_turn", input_tokens=5, output_tokens=3,
         )
 
@@ -1694,7 +1866,7 @@ class _RetryOnceClient(_FakeClient):
                 stop_reason="tool_use", input_tokens=6, output_tokens=3,
             )
         return LLMResponse(
-            text='{"reflection":"The single retry recovered.","hypothesis_supported":true,"suggested_next":"continue"}',
+            text='{"reflection":"The single retry recovered.","hypothesis_status":"supported","suggested_next":"continue"}',
             tool_calls=[], stop_reason="end_turn", input_tokens=7, output_tokens=4,
         )
 
@@ -1739,6 +1911,8 @@ def test_prompt_templates_render_and_have_a_stable_hash():
         stage_instruction="Perform EDA.",
         experiment_ledger="[]",
         research_plan="[]",
+        prior_experiment_evidence='{"evidence_id":"prior-run:test"}',
+        cross_run_history="{}",
     )
     second = render_prompt(
         "iteration.md",
@@ -1750,10 +1924,42 @@ def test_prompt_templates_render_and_have_a_stable_hash():
         stage_instruction="Use prior evidence.",
         experiment_ledger='[{"iteration":1,"primary":0.602}]',
         research_plan='[{"hypothesis":"per-user BPR"}]',
+        prior_experiment_evidence='{"evidence_id":"prior-run:test"}',
+        cross_run_history="{}",
     )
     assert "experiment `1`" in first.content
     assert first.template_sha256 == second.template_sha256
     assert len(first.template_sha256) == 64
+
+
+def test_prior_experiment_evidence_is_injected_with_attribution_warning():
+    from mle_agent.research_agent.prior_evidence import (
+        compact_prior_experiment_evidence,
+        load_prior_experiment_evidence,
+    )
+
+    evidence = load_prior_experiment_evidence()
+    payload = evidence["payload"]
+    assert payload["evidence_id"] == "prior-run:20260830_134108"
+    assert payload["trials"][-1]["primary"] == 0.6037182173239961
+    assert payload["retained_winner"]["training_objective_verified_from_source"].startswith(
+        "pointwise sigmoid/BCE"
+    )
+    rendered = render_prompt(
+        "iteration.md",
+        iteration=1,
+        candidate_dir="trial_001",
+        parent_primary="0.601854",
+        best_primary="0.601854",
+        max_turns=8,
+        stage_instruction="Use prior evidence.",
+        experiment_ledger="[]",
+        research_plan="[]",
+        prior_experiment_evidence=compact_prior_experiment_evidence(),
+        cross_run_history="{}",
+    )
+    assert "0.6037182173239961" in rendered.content
+    assert "incorrect BPR attribution" in rendered.content
 
 
 def test_inspect_data_exposes_candidate_feature_sources_without_hidden_rows():
@@ -2298,7 +2504,7 @@ def test_iteration_aborted_before_a_proposal_still_writes_a_valid_log_row():
     """
     from dataclasses import replace
 
-    from mle_agent.research_agent.adk_agent import AgentIterationResult
+    from mle_agent.research_agent.agent import AgentIterationResult
 
     aborted = AgentIterationResult(
         success=False,
@@ -2332,7 +2538,7 @@ def test_iteration_aborted_before_a_proposal_still_writes_a_valid_log_row():
 
 def test_a_real_experiment_still_requires_genuine_reasoning():
     """The abort path must not become a way to log an experiment without reasoning."""
-    from mle_agent.research_agent.adk_agent import AgentIterationResult
+    from mle_agent.research_agent.agent import AgentIterationResult
 
     ran_but_silent = AgentIterationResult(
         success=False,

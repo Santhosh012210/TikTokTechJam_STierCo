@@ -170,4 +170,14 @@ For every experiment:
    official evaluator.
 5. If execution fails, diagnose, edit, and rerun within the available turn budget.
 6. After a scored run, respond with a concise JSON object containing `reflection`,
-   `hypothesis_supported`, and `suggested_next`.
+   `hypothesis_status`, `implementation_diagnosis`, and `suggested_next`.
+
+   `hypothesis_status` is three-valued and the distinction is load-bearing:
+   `supported` when the metrics back the hypothesis, `not_supported` when the
+   experiment was a fair test and the hypothesis lost, and `not_tested` when the
+   implementation failed so the result says nothing about the idea. Choose
+   `not_tested` whenever you cannot rule out a bug -- a candidate scoring at or
+   below the item-popularity rung almost certainly did not learn at all. Recording
+   a broken build as `not_supported` retires a research direction that was never
+   actually tried. When you choose `not_tested`, `implementation_diagnosis` must
+   say what was wrong and what a corrected attempt would change.

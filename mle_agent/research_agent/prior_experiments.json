@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "evidence_id": "prior-run:20260830_134108",
+  "status": "verified_local_development_evidence_not_official_artifact",
+  "source_run_id": "20260830_134108",
+  "verification": {
+    "method": "re-scored retained validation prediction CSVs with the trusted current evaluator",
+    "rows": 124909,
+    "users": 22377,
+    "seed": 42
+  },
+  "trials": [
+    {
+      "trial": "trial_000",
+      "GAUC": 0.6674305133278906,
+      "nDCG@5": 0.5362781922190429,
+      "primary": 0.6018543527734668,
+      "model_sha256": "1b7a5ee8871a10cc8a73e8778f766ca2b70797412d86466709b5dee806d596ac",
+      "prediction_sha256": "393406dd34a940c175a797bc48298787b88644481d84c6b237ba3147d04775d0"
+    },
+    {
+      "trial": "trial_001",
+      "GAUC": 0.669870369586565,
+      "nDCG@5": 0.5367146632950441,
+      "primary": 0.6032925164408045,
+      "model_sha256": "bc4f7621a08ad611ef1f88832797de8cf8dc1db0c6a0ce49fc1a3198d8a69074",
+      "prediction_sha256": "b3a6b73d0ee65d3e2f5a1237ad07ac7bfa153cc965d3e1270a1fbe69a3a31246"
+    },
+    {
+      "trial": "trial_002",
+      "GAUC": 0.6700463157559091,
+      "nDCG@5": 0.5369484817646873,
+      "primary": 0.6034973987602983,
+      "model_sha256": "768062b0b562704a60946d3b8f9ee681c0fc003ae88c6e160abcdd3d00a238e8",
+      "prediction_sha256": "a21d5c9a8830dadb4a6dc7ddcd2368ae4249323a5d03a463626a4c0491d6155e"
+    },
+    {
+      "trial": "trial_003",
+      "GAUC": 0.6700086874591596,
+      "nDCG@5": 0.5374277471888327,
+      "primary": 0.6037182173239961,
+      "model_sha256": "2359f89377c4e30a3908c24c40080084496f40b4b4296ec0800f733a807c399b",
+      "prediction_sha256": "f90886f6eb03f790e3b09b1c58b8041e735d34fd4ef657fcf9bfd4b3fd54796c"
+    }
+  ],
+  "retained_winner": {
+    "model_family": "NumPy factorization machine",
+    "training_objective_verified_from_source": "pointwise sigmoid/BCE gradient with Adam-style updates",
+    "fields": [
+      "user_id",
+      "video_id",
+      "author_id",
+      "tab",
+      "dur_bucket",
+      "item_rate_bucket",
+      "user_rate_bucket",
+      "hour_bin",
+      "user_count_bucket"
+    ]
+  },
+  "interpretation": [
+    "Treat 0.603718 as a prior frontier to reproduce and improve, not as the reproduced baseline.",
+    "The retained source contradicts the old report's BPR attribution; BPR is not proven by this artifact.",
+    "Later trials changed fields, feature construction, and optimizer settings together, so individual feature effects are confounded.",
+    "Train-only smoothed item/user rates, time context, and user-count interactions merit controlled reproduction.",
+    "Pure user-only first-order terms cannot reorder impressions within a user; retain them only through candidate-varying interactions.",
+    "Do not blindly repeat this sequence. Consolidate it once, isolate mechanisms, then extend it with a distinct high-upside family."
+  ]
+}

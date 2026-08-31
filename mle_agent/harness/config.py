@@ -60,6 +60,12 @@ class Config:
     BASELINE_GAUC:        float = 0.6674
     BASELINE_NDCG:        float = 0.5357
     ORACLE_PRIMARY:       float = 0.8484
+    # Reference rungs from the starter kit, used to tell an idea that lost from an
+    # implementation that never worked. A candidate with the baseline's features
+    # plus more that cannot beat "rank by global item popularity" has a bug, not a
+    # refuted hypothesis.
+    POPULARITY_PRIMARY:   float = 0.5807
+    RANDOM_PRIMARY:       float = 0.4834
     HEADROOM:             float = 0.2468
     CONVERGENCE_EPSILON:  float = 0.002
     CONVERGENCE_N:        int   = 3
@@ -103,6 +109,21 @@ class Config:
     AGENT_EXPERIMENT_MEMORY_LIMIT: int  = int(
         os.environ.get("AGENT_EXPERIMENT_MEMORY_LIMIT", "8")
     )
+    AGENT_MODEL: str = os.environ.get(
+        "AGENT_MODEL", "openai:gpt-5.6-terra"
+    ).strip()
+    AGENT_REASONING_EFFORT: str = os.environ.get(
+        "AGENT_REASONING_EFFORT", "low"
+    ).strip().lower()
+    AGENT_MODEL_TIMEOUT_S: float = float(
+        os.environ.get("AGENT_MODEL_TIMEOUT_S", "120")
+    )
+    # The harness owns retry (ResearchAgent._complete_with_one_retry), which logs
+    # every attempt and bills it against AGENT_MAX_RUN_COST_USD. The provider
+    # client's own retry is disabled, so this is deliberately not passed through.
+    AGENT_MAX_RUN_COST_USD: float = float(
+        os.environ.get("AGENT_MAX_RUN_COST_USD", "1.00")
+    )
     PROVIDER_RETRY_DELAY_S:       float = float(os.environ.get("PROVIDER_RETRY_DELAY_S", "1"))
     RATE_LIMIT_RETRY_DELAY_S:     float = float(os.environ.get("RATE_LIMIT_RETRY_DELAY_S", "60"))
 
@@ -113,6 +134,23 @@ class Config:
     RUN_ENV_DIR: Path | None = None
     RUN_ENV_ARTIFACT_DIR: Path | None = None
     RUN_RESEARCH_DIR: Path | None = None
+
+    # Phase-aware conversation memory. The budget is the point at which the
+    # harness compacts bootstrap traffic into structured state; the tail budget
+    # bounds how much recent experiment conversation survives that compaction.
+    # Both are estimates in the cost gate's conservative 3-chars-per-token units,
+    # not exact tokenizer counts.
+    AGENT_CONTEXT_TOKEN_BUDGET: int = int(
+        os.environ.get("AGENT_CONTEXT_TOKEN_BUDGET", "60000")
+    )
+    AGENT_EXPERIMENT_TAIL_TOKEN_BUDGET: int = int(
+        os.environ.get("AGENT_EXPERIMENT_TAIL_TOKEN_BUDGET", "24000")
+    )
+    # Run the deterministic bootstrap (discovery, required reads, EDA, environment
+    # inventory, baseline reproduction) in Python before the first model call.
+    AGENT_BOOTSTRAP_PREFETCH: bool = os.environ.get(
+        "AGENT_BOOTSTRAP_PREFETCH", "1"
+    ).strip().lower() not in {"0", "false", "no"}
 
     # Trusted research-quality controls.
     EDA_QUERY_CACHE_LIMIT: int = int(os.environ.get("EDA_QUERY_CACHE_LIMIT", "64"))
@@ -164,6 +202,14 @@ def load_config() -> Config:
         cfg.BASELINE_GAUC    = fm.get("valid", {}).get("GAUC",    cfg.BASELINE_GAUC)
         cfg.BASELINE_NDCG    = fm.get("valid", {}).get("nDCG@5",  cfg.BASELINE_NDCG)
         cfg.ORACLE_PRIMARY   = oracle.get("valid", {}).get("primary", cfg.ORACLE_PRIMARY)
+        popularity = scores.get("item_popularity", {})
+        random_rung = scores.get("random", {})
+        cfg.POPULARITY_PRIMARY = popularity.get("valid", {}).get(
+            "primary", cfg.POPULARITY_PRIMARY
+        )
+        cfg.RANDOM_PRIMARY = random_rung.get("valid", {}).get(
+            "primary", cfg.RANDOM_PRIMARY
+        )
         cfg.HEADROOM         = cfg.ORACLE_PRIMARY - cfg.BASELINE_PRIMARY
         cfg.CONVERGENCE_EPSILON = float(conv.get("epsilon", cfg.CONVERGENCE_EPSILON))
         cfg.CONVERGENCE_N       = int(conv.get("N",       cfg.CONVERGENCE_N))

@@ -3,7 +3,7 @@
 An **autonomous ML research agent** that tries to beat the official Factorization Machine
 baseline on the [KuaiRand-Pure](https://kuairand.com) within-user ranking benchmark.
 
-It runs one persistent Google ADK research session across the complete MLE loop: understand
+It runs one persistent LangChain-backed research session across the complete MLE loop: understand
 the benchmark, inspect train/validation data, research and propose a hypothesis,
 implement a self-contained candidate model, train and score it, repair failures, and
 reflect before the next experiment — until it converges or runs out of budget.
@@ -37,7 +37,7 @@ Full conventions live in `baseline_kuairand-starter-kit/evaluate.py` and its REA
 mle_agent/
   research_agent/                  persistent reasoning, prompts, and method corpus
   harness/                         deterministic runtime, safety, convergence, evidence
-  tests/                           offline, ADK, and recovery tests
+  tests/                           offline, memory/prefetch, and recovery tests
   scripts/                         run, verify, recovery-demo, and finalization commands
 baseline_kuairand-starter-kit/     organiser starter kit — read-only reference
 datasets/                          dataset instructions; downloaded data is gitignored
@@ -62,7 +62,11 @@ log are not exposed to candidate processes.
 | Module | Role |
 |---|---|
 | `mle_agent/harness/agent_main.py` | Single-agent run entrypoint — baseline, budgets, convergence, selection, evidence |
-| `mle_agent/research_agent/adk_agent.py` | Persistent Google ADK session, recovery loop, compact experiment memory |
+| `mle_agent/research_agent/agent.py` | Persistent research session, recovery loop, phase-aware memory |
+| `mle_agent/research_agent/experiment_history.py` | Cross-run memory of every scored experiment, including failures |
+| `mle_agent/harness/memory.py` | Phase-aware context compaction policy |
+| `mle_agent/harness/bootstrap_prefetch.py` | Deterministic bootstrap and source curation |
+| `mle_agent/harness/tool_schemas.py` | Pydantic argument models; the single tool-schema source |
 | `mle_agent/harness/agent_tools.py` | Constrained tools — train/valid EDA, literature, file editing, model execution |
 | `mle_agent/harness/hooks.py` | Immediate syntax check; failed saves gate execution until repaired |
 | `mle_agent/harness/main.py` + Builder/Strategist | Legacy comparison path; not used for the submission run |
@@ -114,7 +118,7 @@ AGENT_MAX_ITER=5 AGENT_MAX_TURNS=20 AGENT_BOOTSTRAP_MAX_TURNS=20 ./mle_agent/scr
 TASK_DEFINITION_CONFIRMED=1 ./mle_agent/scripts/run_official.sh
 ```
 
-Before experiment 1, the ADK agent completes a separately budgeted bootstrap phase. It discovers the
+Before experiment 1, the harness completes a deterministic bootstrap phase in Python. It discovers the
 starter-kit task documentation, reads the complete README, `baseline.py`, `evaluate.py`,
 `data.py`, `ablation_features.py`, and inherited candidate through explicit pages, inspects
 the train/validation-only data view and its available columns, searches the local literature
@@ -146,7 +150,7 @@ and outcome is logged, and the resolved environment is written to `environment/r
 
 When Gemini returns a real quota/rate-limit response, an interactive run asks once whether
 to resume after reset. Choosing `y` waits for the provider-advertised retry interval and
-automatically resumes the same ADK session. Later quota pauses in that run need no further
+automatically resumes the same session. Later quota pauses in that run need no further
 human confirmation.
 
 ---
@@ -183,7 +187,7 @@ execution attempts, errors, recovery outcomes, reflection, next direction, token
 time, and intervention flag. Run summaries add the explicit stop reason, convergence
 history, per-metric deltas, provider, GPU-hours, and validation-best candidate.
 
-`./mle_agent/scripts/demo_recovery.sh` reproducibly drives the real persistent ADK tool
+`./mle_agent/scripts/demo_recovery.sh` reproducibly drives the real agent tool
 loop through an invalid save, a blocked execution, a runtime traceback, and a successful
 repair using a deterministic fake provider. Its sanitized evidence is written to
 `artifacts/demo/recovery/`.
