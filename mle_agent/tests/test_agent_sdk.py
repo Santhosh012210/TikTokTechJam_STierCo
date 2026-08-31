@@ -280,6 +280,93 @@ def test_root_candidate_preserves_trusted_finalization_contract():
     assert scan_candidate_source(source) == []
 
 
+def test_torch_dcn_fixture_is_contract_compliant():
+    import ast
+
+    fixture = (
+        Path(__file__).resolve().parent / "fixtures" / "torch_dcn_model.py"
+    )
+    source = fixture.read_text(encoding="utf-8")
+
+    # Hidden-test / package-manager policy scanner must be clean.
+    assert scan_candidate_source(source) == []
+    assert "import mle_agent" not in source and "from mle_agent" not in source
+
+    # Candidate contract: same CLI, same aligned-prediction header, row-count guard.
+    tree = ast.parse(source)
+    flags = {
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "add_argument"
+        and node.args and isinstance(node.args[0], ast.Constant)
+    }
+    assert {
+        "--data_dir", "--seed", "--prediction-path", "--trial-config", "--submission-path",
+    } <= flags
+    assert '["row_id", "user_id", "video_id", "score"]' in source
+    assert "1_141_112" in source and "124_909" in source
+    assert "write_hidden_submission" in source
+    assert '"".join(("te", "st"))' in source or "'te', 'st'" in source
+    # Deterministic seeding of every RNG source.
+    for call in ("random.seed", "np.random.seed", "torch.manual_seed"):
+        assert call in source
+
+
+def test_torch_dcn_fixture_scores_on_synthetic_data():
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        return  # torch not pre-warmed in this environment; contract test still runs
+
+    import subprocess
+    fixture = Path(__file__).resolve().parent / "fixtures" / "torch_dcn_model.py"
+    with tempfile.TemporaryDirectory() as temp:
+        kit = Path(temp) / "kit"
+        kit.mkdir()
+        # Minimal data/evaluate stand-ins: 200 train rows, 40 valid rows, 2 users.
+        (kit / "data.py").write_text(
+            "import numpy as np\n"
+            "def load(_d):\n"
+            "    rng = np.random.default_rng(0)\n"
+            "    def rows(n):\n"
+            "        return [(0, f'u{i%2}', f'v{i%7}', 'a', 't', 1.0, int(i%3==0)) for i in range(n)]\n"
+            "    return {'train': rows(200), 'valid': rows(40), 'test': rows(20)}\n"
+            "def encode(splits):\n"
+            "    enc = {}\n"
+            "    for name, rws in splits.items():\n"
+            "        X = np.zeros((len(rws), 5), dtype=np.int32)\n"
+            "        for n, x in enumerate(rws):\n"
+            "            X[n] = [hash(v) % 11 for v in (x[1], x[2], x[3], x[4], '0')]\n"
+            "        y = np.array([x[6] for x in rws], dtype=np.float32)\n"
+            "        enc[name] = (X, y, [x[1] for x in rws])\n"
+            "    return enc, 11\n",
+            encoding="utf-8",
+        )
+        (kit / "evaluate.py").write_text(
+            "def evaluate(users, labels, scores):\n"
+            "    return {'GAUC': 0.6, 'nDCG@5': 0.5, 'primary': 0.55}\n",
+            encoding="utf-8",
+        )
+        # Loosen the fixed row-count guard for the synthetic run.
+        src = fixture.read_text(encoding="utf-8").replace(
+            "if len(splits[\"train\"]) != 1_141_112 or len(splits[\"valid\"]) != 124_909:",
+            "if False:",
+        )
+        candidate = kit / "model.py"
+        candidate.write_text(src, encoding="utf-8")
+        prediction = Path(temp) / "pred.csv"
+        result = subprocess.run(
+            ["python", str(candidate), "--data_dir", str(kit), "--seed", "42",
+             "--prediction-path", str(prediction)],
+            cwd=str(kit), capture_output=True, text=True, timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        header = prediction.read_text(encoding="utf-8").splitlines()[0]
+        assert header == "row_id,user_id,video_id,score"
+
+
 def test_trusted_submission_writer_outputs_aligned_finite_scores():
     rows = [
         (20220429, "user-a", "video-1", "author", "tab", 1000.0, 0),

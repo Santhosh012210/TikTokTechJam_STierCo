@@ -46,6 +46,12 @@ Substantial feature pipelines, model replacements, loss rewrites, training chang
 `model.py` rewrites are valid when evidence justifies them. Do not prefer a small diff when it would
 turn the proposed method into a superficial proxy.
 
+A tuned DeepFM / DCN / xDeepFM (PyTorch) or a GBDT ranker (LightGBM) is a valid `model`-component
+experiment. Request the package with `request_dependency_install`, set `execution_class:
+"substantial"`, seed torch/numpy/random from `--seed`, bound epochs, early-stop on the official
+validation primary, and restore the best checkpoint. Keep the inherited prediction and submission
+writers; a framework candidate still emits the aligned validation prediction CSV itself.
+
 Inspect the available ML environment during bootstrap. Use installed frameworks when they are a
 good fit. If a justified experiment needs a missing package, call `request_dependency_install`;
 the harness auto-installs its known-good ML allowlist as binary wheels in this run's dedicated

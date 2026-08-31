@@ -38,8 +38,11 @@ changes.
 
 The official NumPy FM is a starting point, not the solution boundary. Consider complete pipeline
 or model replacements and established open-source frameworks when they offer a better test of the
-hypothesis. Use `inspect_environment` evidence retained from bootstrap. If a required package is
-missing, call `request_dependency_install` with the narrow package list and a concrete justification.
+hypothesis: a tuned DeepFM/DCN/xDeepFM (PyTorch) or a LightGBM ranker is a valid `model` experiment
+-- set `execution_class: "substantial"`, seed every RNG from `--seed`, bound epochs, early-stop on
+the official validation primary, and restore the best checkpoint. Use `inspect_environment`
+evidence retained from bootstrap. If a required package is missing, call `request_dependency_install`
+with the narrow package list and a concrete justification.
 Known-good ML packages resolve automatically as binary wheels inside the dedicated run venv;
 off-allowlist packages require user approval. Continue only after the harness reports the dependency
 installed. Never invoke pip from `model.py`.
