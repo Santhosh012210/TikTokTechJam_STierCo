@@ -13,6 +13,17 @@ Compact prior experiment ledger (empty on experiment 1):
 ${experiment_ledger}
 ```
 
+Ranked research backlog recorded during bootstrap (follow it; revise priorities only with new
+evidence):
+
+```json
+${research_plan}
+```
+
+Experiments 1-3 must each target a distinct `target_component`. The harness refuses a repeat before
+three distinct components have been scored unless you pass `diversity_override` with a written,
+evidence-based justification. Work through the backlog's first three families first.
+
 Choose a non-redundant, evidence-backed change. Before editing, form one compact proposal with:
 the observation, precise hypothesis, primary target component, literature or prior-run evidence,
 expected metric effect, falsification criterion, implementation plan, and rollback plan. The plan

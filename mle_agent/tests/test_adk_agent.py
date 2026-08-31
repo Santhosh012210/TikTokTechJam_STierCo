@@ -407,6 +407,7 @@ def test_successful_context_on_last_call_completes_without_summary_call() -> Non
             literature_queries=["within-user ranking"],
             baseline_reproduced=True,
             baseline_metrics={"GAUC": 0.6674, "nDCG@5": 0.5358, "primary": 0.6016},
+            research_backlog=[{"hypothesis": "seeded", "target_component": "loss"}],
         )
         payload = {
             "task_objective": "Improve within-user ranking.",

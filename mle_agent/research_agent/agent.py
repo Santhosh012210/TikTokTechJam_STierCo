@@ -569,6 +569,9 @@ class ResearchAgent:
             best_primary=f"{best_primary:.6f}",
             max_turns=max_turns,
             experiment_ledger="[]",
+            research_plan=json.dumps(
+                self.bootstrap_state.research_backlog or [], ensure_ascii=False
+            ),
             stage_instruction=(
                 "Use the retained task context, reproduced baseline result, literature evidence, "
                 "and full prior conversation to choose the next change."

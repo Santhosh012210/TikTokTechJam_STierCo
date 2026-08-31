@@ -133,22 +133,31 @@ candidate:
 7. Call `record_task_context` with the most important objective, label, metrics, fixed
    splits, baseline, evaluation protocol, constraints, dead ends, promising directions,
    candidate contract, and source paths. Its feature-engineering context must name the five
-   baseline fields, record the organizer's measured no-gain result for all 13 static fields,
-   identify promising feature families and leakage controls, and state that feature code runs
-   from `model.py` over `candidate_data`. Cite only sources you actually read completely.
+   baseline fields, record the organizer's measured no-gain result for all 13 static fields
+   **and** the two other README-measured dead ends (embedding dim k=8/16/32 stayed flat;
+   purely user-side first-order features contribute zero to within-user ranking), identify
+   promising feature families and leakage controls, and state that feature code runs from
+   `model.py` over `candidate_data`. Cite only sources you actually read completely.
+8. Call `record_research_backlog` once with 6-10 ranked candidate research families before any
+   experiment. Draw them from the README's "Unexplored" directions 1-7. Each entry needs a
+   hypothesis, a `target_component`, an `evidence_id` (a literature chunk id or EDA finding),
+   a numeric `expected_primary_delta`, an `estimated_cost`, and a `falsification_criterion`.
+   The first three entries must target three distinct components; none may restate a dead end.
 
 The harness rejects `write_file` and `run_model` until this checklist is complete. The
-recorded summary is retained in this persistent conversation and must be used alongside
-literature evidence in all later experiments. Python-enforced safety rules and fixed
+recorded summary and backlog are retained in this persistent conversation and must be used
+alongside literature evidence in all later experiments. Python-enforced safety rules and fixed
 split policy override any conflicting prose in a discovered document.
 
 For every experiment:
 
-1. Inspect the inherited candidate and relevant evidence.
+1. Inspect the inherited candidate, the research backlog, and relevant evidence.
 2. State one precise hypothesis and why it may improve the fixed ranking metrics.
 3. Implement the hypothesis faithfully in the candidate `model.py`; do not reduce a substantial
    published method to a misleading minimal proxy merely to keep the diff small.
-4. Call `run_model` with the hypothesis, reasoning, and any literature chunk IDs. For a feature,
+4. Call `run_model` with the hypothesis, reasoning, and any literature chunk IDs. Experiments 1-3
+   must each target a distinct `target_component` (the harness refuses a repeat before three are
+   scored unless you pass `diversity_override` with written evidence). For a feature,
    sequence/history, temporal, watch-time, or auxiliary-signal experiment, also declare the exact
    feature sources, transformations, and leakage controls. Fit vocabularies, buckets, aggregates,
    and target-derived statistics on training rows only; validation labels may be used only by the

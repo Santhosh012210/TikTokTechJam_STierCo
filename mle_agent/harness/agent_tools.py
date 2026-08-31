@@ -355,6 +355,12 @@ class BootstrapState:
     task_context: dict[str, object] | None = None
     rejected_actions: list[dict[str, object]] = field(default_factory=list)
     seen_candidate_fingerprints: set[str] = field(default_factory=set)
+    # Ranked evidence-backed research plan produced right after task context.
+    research_backlog: list[dict[str, object]] | None = None
+    backlog_reject_count: int = 0
+    # Every successfully scored experiment's target component, across iterations.
+    # Persists because the same BootstrapState is reused for every run_iteration.
+    scored_experiments: list[dict[str, object]] = field(default_factory=list)
 
     @property
     def complete(self) -> bool:
@@ -400,6 +406,8 @@ class BootstrapState:
             missing.append("reproduce the official baseline")
         if not before_context and self.task_context is None:
             missing.append("record the structured task context")
+        if not before_context and self.research_backlog is None:
+            missing.append("record the ranked research backlog")
         return missing
 
     def missing_baseline_prerequisites(self) -> list[str]:
@@ -461,6 +469,9 @@ class BootstrapState:
             "baseline_metrics": self.baseline_metrics,
             "baseline_execution": self.baseline_execution,
             "task_context": self.task_context,
+            "research_backlog": self.research_backlog,
+            "backlog_reject_count": self.backlog_reject_count,
+            "scored_experiments": self.scored_experiments,
             "rejected_actions": self.rejected_actions,
             "successful_candidate_fingerprints": len(self.seen_candidate_fingerprints),
         }
@@ -598,6 +609,61 @@ def _repeats_measured_dead_end(payload: dict, proposal: dict) -> str | None:
                 "field -- add an item-side cross to feature_transformations."
             )
     return None
+
+
+RUN_MODEL_COMPONENTS = (
+    "loss", "sampling", "features", "sequence", "auxiliary-task",
+    "model", "training", "evaluation",
+)
+
+
+def _validate_research_backlog(candidates: object) -> list[str]:
+    """Check the ranked research plan the agent must produce before experimenting."""
+    if not isinstance(candidates, list) or not 6 <= len(candidates) <= 10:
+        return ["research_backlog must be a list of 6 to 10 ranked candidate families"]
+    errors: list[str] = []
+    for index, entry in enumerate(candidates):
+        if not isinstance(entry, dict):
+            errors.append(f"candidate {index} must be an object")
+            continue
+        for field_name in (
+            "hypothesis", "evidence_id", "estimated_cost", "falsification_criterion",
+        ):
+            value = entry.get(field_name)
+            if not isinstance(value, str) or not value.strip():
+                errors.append(f"candidate {index} needs a non-empty {field_name}")
+        if not isinstance(entry.get("expected_primary_delta"), (int, float)):
+            errors.append(
+                f"candidate {index} needs a numeric expected_primary_delta"
+            )
+        if str(entry.get("target_component", "")).lower() not in RUN_MODEL_COMPONENTS:
+            errors.append(
+                f"candidate {index} target_component must be one of {RUN_MODEL_COMPONENTS}"
+            )
+    first_three = [
+        str(entry.get("target_component", "")).lower()
+        for entry in candidates[:3]
+        if isinstance(entry, dict)
+    ]
+    if len(set(first_three)) < 3:
+        errors.append(
+            "the first three backlog entries must cover three distinct target_components "
+            "(e.g. loss, features, model)"
+        )
+    if candidates and all(
+        isinstance(entry, dict)
+        and _repeats_measured_dead_end(
+            {
+                "hypothesis": entry.get("hypothesis", ""),
+                "reasoning": entry.get("falsification_criterion", ""),
+            },
+            {"target_component": entry.get("target_component", "")},
+        )
+        is not None
+        for entry in candidates
+    ):
+        errors.append("every backlog entry merely restates a measured dead end")
+    return errors
 
 
 @dataclass
@@ -1091,12 +1157,16 @@ class AgentToolRuntime:
         dependency_approver: Callable[[list[str], str], bool] | None = None,
         dependency_installer: Callable[[Config, list[str]], dict[str, object]] | None = None,
         run_deadline: float | None = None,
+        iteration: int = 0,
     ) -> None:
         self.candidate_dir = candidate_dir
         self.config = config
         # Epoch seconds at which the run's wall budget expires, or None when the
         # caller does not enforce one (offline tests, single-shot tools).
         self.run_deadline = run_deadline
+        # Experiment number this runtime serves; 0 during bootstrap. Used by the
+        # first-three diversity gate, which persists onto bootstrap_state.
+        self.iteration = int(iteration)
         self.bootstrap_state = bootstrap_state or BootstrapState()
         self.dependency_approver = dependency_approver
         self.dependency_installer = dependency_installer or install_python_dependencies
@@ -1767,6 +1837,51 @@ class AgentToolRuntime:
                     "for this and every later experiment."
                 ),
             }, ensure_ascii=False, indent=2)
+        if name == "record_research_backlog":
+            if self.bootstrap_state.task_context is None:
+                return json.dumps({
+                    "success": False,
+                    "error": "BACKLOG_REQUIRES_TASK_CONTEXT",
+                    "instruction": "Call record_task_context first.",
+                }, ensure_ascii=False, indent=2)
+            candidates = payload.get("candidates")
+            errors = _validate_research_backlog(candidates)
+            degraded = False
+            if errors and self.bootstrap_state.backlog_reject_count >= 3:
+                # Do not let backlog validation deadlock the bootstrap phase.
+                degraded, errors = True, []
+            if errors:
+                self.bootstrap_state.backlog_reject_count += 1
+                record = {
+                    "action": "record_research_backlog",
+                    "error": "RESEARCH_BACKLOG_INVALID",
+                    "validation_errors": errors,
+                    "attempt": self.bootstrap_state.backlog_reject_count,
+                }
+                self.bootstrap_state.rejected_actions.append(record)
+                return json.dumps({"success": False, **record}, ensure_ascii=False, indent=2)
+            normalized = json.loads(json.dumps(candidates))
+            self.bootstrap_state.research_backlog = normalized
+            if self.config.RUN_RESEARCH_DIR is not None:
+                self.config.RUN_RESEARCH_DIR.mkdir(parents=True, exist_ok=True)
+                (self.config.RUN_RESEARCH_DIR / "research_plan.json").write_text(
+                    json.dumps(
+                        {"candidates": normalized, "backlog_degraded": degraded},
+                        ensure_ascii=False, indent=2,
+                    ) + "\n",
+                    encoding="utf-8",
+                )
+            return json.dumps({
+                "success": True,
+                "status": "RESEARCH_BACKLOG_RECORDED",
+                "entries": len(normalized),
+                "backlog_degraded": degraded,
+                "instruction": (
+                    "Experiments 1-3 must cover three distinct target_components. The "
+                    "diversity gate refuses a repeat before then unless you pass "
+                    "diversity_override."
+                ),
+            }, ensure_ascii=False, indent=2)
         if name == "run_model":
             if not self.bootstrap_state.complete:
                 return self._bootstrap_rejection("run_model")
@@ -1914,6 +2029,36 @@ class AgentToolRuntime:
                 self.executions.append(record)
                 return json.dumps(record, ensure_ascii=False, indent=2)
 
+            # First-three diversity gate: until three distinct components have been
+            # scored, refuse a repeat unless the agent justifies it in writing.
+            scored_components = {
+                str(item.get("target_component"))
+                for item in self.bootstrap_state.scored_experiments
+            }
+            if (
+                len(scored_components) < 3
+                and target_component in scored_components
+                and not str(payload.get("diversity_override", "")).strip()
+            ):
+                record = {
+                    "hypothesis": str(payload.get("hypothesis", "")),
+                    "reasoning": str(payload.get("reasoning", "")),
+                    "literature_chunk_ids": list(payload.get("literature_chunk_ids", [])),
+                    "proposal": proposal,
+                    "success": False,
+                    "metrics": None,
+                    "error": (
+                        "DIVERSITY_REQUIRED: score three distinct target_components before "
+                        f"repeating '{target_component}'. The research backlog's first three "
+                        "families must cover distinct components. Pass diversity_override with "
+                        "a written evidence-based justification to proceed anyway."
+                    ),
+                    "wall_seconds": 0.0,
+                    "candidate_changed": True,
+                }
+                self.executions.append(record)
+                return json.dumps(record, ensure_ascii=False, indent=2)
+
             execution_class = str(payload.get("execution_class", "normal"))
             requested_seed = int(payload.get("seed", self.config.SEED))
             trial_config = payload.get("trial_config")
@@ -1975,5 +2120,9 @@ class AgentToolRuntime:
                 self.bootstrap_state.seen_candidate_fingerprints.add(
                     candidate_fingerprint
                 )
+                self.bootstrap_state.scored_experiments.append({
+                    "iteration": self.iteration,
+                    "target_component": target_component,
+                })
             return json.dumps(record, ensure_ascii=False, indent=2)
         return f"ERROR: unknown tool {name!r}"

@@ -118,6 +118,22 @@ class _TrialConfig(BaseModel):
     patience: int | None = None
 
 
+class _ResearchBacklogEntry(BaseModel):
+    """One ranked candidate research family in the bootstrap research plan."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hypothesis: str
+    target_component: Literal[
+        "loss", "sampling", "features", "sequence",
+        "auxiliary-task", "model", "training", "evaluation",
+    ]
+    evidence_id: str
+    expected_primary_delta: float
+    estimated_cost: str
+    falsification_criterion: str
+
+
 class ResearchAgent:
     """One persistent Google ADK agent for the complete research run."""
 
@@ -798,10 +814,27 @@ class ResearchAgent:
                 "source_paths": source_paths,
             })
             if result.get("success") and tool_context is not None:
-                # Bootstrap completion is itself the useful final output. Do
-                # not spend another provider call merely summarizing it.
                 tool_context.actions.skip_summarization = True
-                tool_context.actions.end_of_agent = True
+                # Bootstrap still needs the research backlog after this, so only
+                # end the turn when every requirement (backlog included) is met.
+                tool_context.actions.end_of_agent = self.bootstrap_state.complete
+            return result
+
+        def record_research_backlog(
+            candidates: list[_ResearchBacklogEntry],
+            tool_context: ToolContext = None,
+        ) -> dict[str, Any]:
+            """Record the ranked, evidence-backed research plan (6-10 families).
+
+            Call once after record_task_context and before any experiment. The
+            first three families must target three distinct pipeline components.
+            """
+            result = dispatch("record_research_backlog", {
+                "candidates": [entry.model_dump() for entry in candidates],
+            })
+            if result.get("success") and tool_context is not None:
+                tool_context.actions.skip_summarization = True
+                tool_context.actions.end_of_agent = self.bootstrap_state.complete
             return result
 
         def run_model(
@@ -864,6 +897,7 @@ class ResearchAgent:
             search_ml_literature,
             reproduce_baseline,
             record_task_context,
+            record_research_backlog,
             run_model,
         ]
 
@@ -885,6 +919,7 @@ class ResearchAgent:
             bool(state.literature_queries),
             state.baseline_reproduced,
             state.task_context is not None,
+            state.research_backlog is not None,
         ]
         missing = state.missing_requirements()
         pending = "; ".join(missing[:3])
@@ -1135,6 +1170,7 @@ class ResearchAgent:
             self.bootstrap_state,
             dependency_approver=self._approve_dependency_install,
             run_deadline=self.run_deadline,
+            iteration=iteration,
         )
         iteration_prompt = render_prompt(
             "iteration.md",
@@ -1145,6 +1181,11 @@ class ResearchAgent:
             max_turns=max_turns,
             experiment_ledger=json.dumps(
                 self._experiment_memory[-self.config.AGENT_EXPERIMENT_MEMORY_LIMIT:],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+            research_plan=json.dumps(
+                self.bootstrap_state.research_backlog or [],
                 ensure_ascii=False,
                 separators=(",", ":"),
             ),

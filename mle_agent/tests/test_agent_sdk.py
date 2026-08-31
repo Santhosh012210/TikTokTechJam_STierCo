@@ -543,6 +543,187 @@ def test_log_row_carries_stability_and_still_validates():
         assert len(row["stability"]["per_seed"]) == 3
 
 
+def _backlog_ready_state(model_path: str) -> BootstrapState:
+    """A required=False state with task_context set -- for the backlog tool alone."""
+    return BootstrapState(
+        required=False,
+        required_candidate_model_path=model_path,
+        fully_read_paths={model_path},
+        task_context={"target_label": "long_view"},
+    )
+
+
+def _fully_bootstrapped_state_missing_backlog(paths: list[str]) -> BootstrapState:
+    """Everything the bootstrap checklist wants except the research backlog."""
+    return BootstrapState(
+        required=True,
+        discovery_completed=True,
+        primary_readme_path=paths[0],
+        required_baseline_path=paths[1],
+        required_evaluation_path=paths[2],
+        required_data_path=paths[3],
+        required_feature_ablation_path=paths[4],
+        required_candidate_model_path=paths[5],
+        fully_read_paths=set(paths),
+        data_inspected=True,
+        environment_inspected=True,
+        environment_inventory={"packages": {"numpy": {"installed": True}}},
+        literature_queries=["ranking losses"],
+        baseline_reproduced=True,
+        baseline_metrics={"GAUC": 0.6674, "nDCG@5": 0.5358, "primary": 0.6016},
+        task_context={"target_label": "long_view"},
+    )
+
+
+def test_run_model_blocked_until_research_backlog_recorded():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        model_path = trial / "model.py"
+        model_path.write_text("value = 1\n", encoding="utf-8")
+        paths = [str(model_path.resolve())] * 6
+        state = _fully_bootstrapped_state_missing_backlog(paths)
+        runtime = AgentToolRuntime(trial, config, state)
+        # write_file and run_model are both gated until the backlog is recorded.
+        blocked_write = runtime.dispatch(
+            "write_file", {"path": "model.py", "content": _CHANGED_SCORING_MODEL}
+        )
+        assert "BOOTSTRAP_REQUIRED" in blocked_write
+        blocked = json.loads(runtime.dispatch("run_model", {
+            "hypothesis": "per-user BPR loss", "reasoning": "align with GAUC",
+            "target_component": "loss",
+        }))
+        assert blocked["error"] == "BOOTSTRAP_REQUIRED"
+        assert "record the ranked research backlog" in blocked["missing_requirements"]
+
+        recorded = json.loads(runtime.dispatch(
+            "record_research_backlog", {"candidates": _valid_research_backlog()}
+        ))
+        assert recorded["success"] and recorded["entries"] == 6
+        assert runtime.dispatch(
+            "write_file", {"path": "model.py", "content": _CHANGED_SCORING_MODEL}
+        ).startswith("OK")
+        ok = json.loads(runtime.dispatch("run_model", {
+            "hypothesis": "per-user BPR loss", "reasoning": "align with GAUC",
+            "target_component": "loss",
+        }))
+        assert ok["success"]
+
+
+def test_research_backlog_validation_rules():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        (trial / "model.py").write_text("value = 1\n", encoding="utf-8")
+        state = _backlog_ready_state(str((trial / "model.py").resolve()))
+        runtime = AgentToolRuntime(trial, config, state)
+
+        too_few = json.loads(runtime.dispatch(
+            "record_research_backlog", {"candidates": _valid_research_backlog()[:5]}
+        ))
+        assert not too_few["success"]
+
+        not_distinct = _valid_research_backlog()
+        not_distinct[1]["target_component"] = "loss"
+        not_distinct[2]["target_component"] = "loss"
+        result = json.loads(runtime.dispatch(
+            "record_research_backlog", {"candidates": not_distinct}
+        ))
+        assert not result["success"]
+        assert any("distinct" in e for e in result["validation_errors"])
+
+        dead_ends = [
+            {
+                "hypothesis": "Raise embedding dimension k to increase capacity.",
+                "target_component": comp,
+                "evidence_id": "x", "expected_primary_delta": 0.001,
+                "estimated_cost": "cheap", "falsification_criterion": "no gain",
+            }
+            for comp in ("loss", "features", "model", "training", "sampling", "sequence")
+        ]
+        result = json.loads(runtime.dispatch(
+            "record_research_backlog", {"candidates": dead_ends}
+        ))
+        assert not result["success"]
+
+        good = json.loads(runtime.dispatch(
+            "record_research_backlog", {"candidates": _valid_research_backlog()}
+        ))
+        assert good["success"]
+        assert state.research_backlog is not None
+
+
+def test_research_backlog_degrades_after_three_rejections():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        (trial / "model.py").write_text("value = 1\n", encoding="utf-8")
+        state = _backlog_ready_state(str((trial / "model.py").resolve()))
+        runtime = AgentToolRuntime(trial, config, state)
+        for attempt in range(3):
+            rejected = json.loads(runtime.dispatch(
+                "record_research_backlog", {"candidates": []}
+            ))
+            assert not rejected["success"]
+        degraded = json.loads(runtime.dispatch(
+            "record_research_backlog", {"candidates": []}
+        ))
+        assert degraded["success"]
+        assert degraded["backlog_degraded"] is True
+        assert state.research_backlog is not None
+
+
+def test_run_model_diversity_gate_refuses_repeat_and_honours_override():
+    config = load_config()
+    state = BootstrapState(required=False)
+    with tempfile.TemporaryDirectory() as temp:
+        first = Path(temp) / "trial_001"
+        second = Path(temp) / "trial_002"
+        first.mkdir()
+        second.mkdir()
+        first.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+        second.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+
+        r1 = AgentToolRuntime(first, config, state, iteration=1)
+        r1.dispatch("write_file", {"path": "model.py", "content": _CHANGED_SCORING_MODEL})
+        scored = json.loads(r1.dispatch("run_model", {
+            "hypothesis": "per-user BPR", "reasoning": "align objective",
+            "target_component": "loss",
+        }))
+        assert scored["success"]
+
+        r2 = AgentToolRuntime(second, config, state, iteration=2)
+        r2.dispatch("write_file", {
+            "path": "model.py",
+            "content": _CHANGED_SCORING_MODEL.replace("semantic-change", "second-change"),
+        })
+        refused = json.loads(r2.dispatch("run_model", {
+            "hypothesis": "listwise softmax loss", "reasoning": "another ranking loss",
+            "target_component": "loss",
+        }))
+        assert not refused["success"]
+        assert refused["error"].startswith("DIVERSITY_REQUIRED")
+
+        allowed = json.loads(r2.dispatch("run_model", {
+            "hypothesis": "listwise softmax loss", "reasoning": "another ranking loss",
+            "target_component": "loss",
+            "diversity_override": "backlog exhausts loss variants before features; evidence bpr#when-it-fails",
+        }))
+        assert allowed["success"]
+
+
+def test_iteration_prompt_renders_research_plan():
+    from mle_agent.research_agent.prompts import render_prompt
+    rendered = render_prompt(
+        "iteration.md",
+        iteration=1, candidate_dir="trial_001",
+        parent_primary="0.601600", best_primary="0.601600", max_turns=8,
+        stage_instruction="x", experiment_ledger="[]",
+        research_plan='[{"hypothesis":"per-user BPR pairwise loss"}]',
+    )
+    assert "per-user BPR pairwise loss" in rendered.content
+
+
 def test_run_model_rejects_a_previously_scored_semantic_candidate():
     config = load_config()
     state = BootstrapState(required=False)
@@ -612,6 +793,23 @@ def _task_context_payload(source_paths: list[str]) -> dict:
         "candidate_contract": ["Accept --data_dir and print JSON metrics."],
         "source_paths": source_paths,
     }
+
+
+def _valid_research_backlog() -> list[dict]:
+    components = [
+        "loss", "features", "model", "sampling", "sequence", "auxiliary-task",
+    ]
+    return [
+        {
+            "hypothesis": f"Try direction targeting {component}.",
+            "target_component": component,
+            "evidence_id": "bpr#how-to-implement",
+            "expected_primary_delta": 0.003,
+            "estimated_cost": "one 13s training run",
+            "falsification_criterion": "primary does not improve beyond noise",
+        }
+        for component in components
+    ]
 
 
 def test_bootstrap_gate_rejects_premature_context_edits_and_runs():
@@ -767,6 +965,12 @@ def test_completed_task_context_persists_across_iteration_runtimes():
             "record_task_context", _task_context_payload(required_paths)
         ))
         assert recorded["success"]
+        assert not state.complete  # backlog still missing
+
+        backlog = json.loads(first_runtime.dispatch(
+            "record_research_backlog", {"candidates": _valid_research_backlog()}
+        ))
+        assert backlog["success"]
         assert state.complete
 
         second_runtime = AgentToolRuntime(second_trial, config, state)
@@ -1011,14 +1215,20 @@ class _BootstrapThenExecuteClient(_FakeClient):
             )
         if self.calls == 4:
             return LLMResponse(
-                text="Recording the retained task context after baseline reproduction.",
-                tool_calls=[ToolCall(
-                    id="record_context", name="record_task_context",
-                    input=_task_context_payload([
-                        self.readme, self.baseline, self.evaluate, self.data,
-                        self.feature_ablation, self.model,
-                    ]),
-                )],
+                text="Recording the retained task context and research backlog.",
+                tool_calls=[
+                    ToolCall(
+                        id="record_context", name="record_task_context",
+                        input=_task_context_payload([
+                            self.readme, self.baseline, self.evaluate, self.data,
+                            self.feature_ablation, self.model,
+                        ]),
+                    ),
+                    ToolCall(
+                        id="record_backlog", name="record_research_backlog",
+                        input={"candidates": _valid_research_backlog()},
+                    ),
+                ],
                 stop_reason="tool_use", input_tokens=10, output_tokens=4,
             )
         if self.calls == 5:
@@ -1311,6 +1521,7 @@ def test_prompt_templates_render_and_have_a_stable_hash():
         max_turns=8,
         stage_instruction="Perform EDA.",
         experiment_ledger="[]",
+        research_plan="[]",
     )
     second = render_prompt(
         "iteration.md",
@@ -1321,6 +1532,7 @@ def test_prompt_templates_render_and_have_a_stable_hash():
         max_turns=10,
         stage_instruction="Use prior evidence.",
         experiment_ledger='[{"iteration":1,"primary":0.602}]',
+        research_plan='[{"hypothesis":"per-user BPR"}]',
     )
     assert "experiment `1`" in first.content
     assert first.template_sha256 == second.template_sha256
