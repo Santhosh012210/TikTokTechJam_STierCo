@@ -182,6 +182,8 @@ def finalize_run(
         "converged": converged,
         "baseline_valid_metrics": run_metrics.get("baseline_valid_metrics"),
         "best_valid_metrics": run_metrics.get("best_valid_metrics"),
+        "best_trial_stability": run_metrics.get("best_trial_stability"),
+        "stability_seeds": run_metrics.get("stability_seeds"),
         "metric_deltas_vs_baseline": run_metrics.get("metric_deltas_vs_baseline"),
         "tokens": run_metrics.get("tokens"),
         "gpu_hours": run_metrics.get("gpu_hours", 0.0),
@@ -202,6 +204,19 @@ def finalize_run(
     best = final_metrics.get("best_valid_metrics") or {}
     baseline = final_metrics.get("baseline_valid_metrics") or {}
     deltas = final_metrics.get("metric_deltas_vs_baseline") or {}
+    stability = final_metrics.get("best_trial_stability")
+    if stability and stability.get("primary_mean") is not None:
+        per_seed = "; ".join(
+            f"seed {seed}: {float(m['primary']):.6f}" if m else f"seed {seed}: failed"
+            for seed, m in stability["per_seed"].items()
+        )
+        stability_line = (
+            f"- Multi-seed primary: mean `{stability['primary_mean']:.6f}` "
+            f"± std `{stability.get('primary_std', 0.0):.6f}` "
+            f"(published FM 5-seed std `0.0008`); {per_seed}\n"
+        )
+    else:
+        stability_line = "- Multi-seed stability: not available for this run\n"
     report = f"""# Final submission
 
 - Source autonomous run: `{run_id}`
@@ -214,7 +229,7 @@ def finalize_run(
 - Python environment: `{python_exe}`
 - Resolved dependency lock: `{final_requirements_lock or 'not recorded by legacy run'}`
 - Per-iteration run logs: `{final_run_dir}`
-
+{stability_line}
 | Validation metric | Official baseline | Final candidate | Delta |
 |---|---:|---:|---:|
 | GAUC | {float(baseline.get('GAUC', 0.0)):.6f} | {float(best.get('GAUC', 0.0)):.6f} | {float(deltas.get('GAUC', 0.0)):+.6f} |

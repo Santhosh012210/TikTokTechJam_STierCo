@@ -10,7 +10,13 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from mle_agent.harness.agent_main import _converged, _log_row
+import mle_agent.harness.agent_main as agent_main_module
+from mle_agent.harness.agent_main import (
+    _converged,
+    _log_row,
+    _stability_across_seeds,
+    render_stability_section,
+)
 import mle_agent.harness.agent_tools as agent_tools_module
 from mle_agent.harness.agent_tools import (
     AgentToolRuntime,
@@ -468,6 +474,73 @@ def test_record_task_context_requires_both_new_measured_dead_ends():
         errors = " ".join(result["feature_context_errors"])
         assert "k=8/16/32" in errors
         assert "user-side first-order" in errors
+
+
+def test_stability_across_seeds_runs_the_two_extra_seeds():
+    config = load_config()
+    seen_seeds: list[int] = []
+
+    def fake_execute_model(candidate_dir, cfg, *, seed=None, **_kwargs):
+        seen_seeds.append(seed)
+        return SimpleNamespace(
+            success=True,
+            metrics={"GAUC": 0.61, "nDCG@5": 0.60, "primary": 0.605 + seed * 1e-7},
+        )
+
+    original = agent_main_module.execute_model
+    agent_main_module.execute_model = fake_execute_model
+    try:
+        out = _stability_across_seeds(
+            Path("."), config, {"GAUC": 0.61, "nDCG@5": 0.60, "primary": 0.605}
+        )
+    finally:
+        agent_main_module.execute_model = original
+
+    assert seen_seeds == [314, 2718]  # seed 42 metrics are passed in, not re-run
+    assert set(out["per_seed"]) == {"42", "314", "2718"}
+    assert out["primary_mean"] is not None
+    assert out["primary_std"] >= 0.0
+    section = render_stability_section(out, best_iteration=3)
+    assert "Multi-seed stability" in section
+    assert "trial_003" in section
+
+
+def test_stability_section_handles_no_new_best():
+    section = render_stability_section(None, best_iteration=0)
+    assert "No candidate beat the reproduced baseline" in section
+
+
+def test_log_row_carries_stability_and_still_validates():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        (trial / "model.py").write_text(
+            _CHANGED_SCORING_MODEL.replace("semantic-change", "initial-candidate"),
+            encoding="utf-8",
+        )
+        client = _FakeClient()
+        agent = ResearchAgent(
+            config, client=client, provider_retry_delay_s=0,
+            bootstrap_state=BootstrapState(required=False),
+        )
+        result = agent.run_iteration(1, trial, 0.6016, 0.6016, max_turns=1)
+        assert result.success
+        stability = {
+            "seeds": [42, 314, 2718],
+            "primary_mean": 0.6051,
+            "primary_std": 0.0004,
+            "per_seed": {
+                "42": {"GAUC": 0.61, "nDCG@5": 0.60, "primary": 0.605},
+                "314": {"GAUC": 0.61, "nDCG@5": 0.60, "primary": 0.6055},
+                "2718": {"GAUC": 0.61, "nDCG@5": 0.60, "primary": 0.6048},
+            },
+        }
+        row = _log_row(
+            1, 0, result, "success", True, 0.6016, 0.2468,
+            "--- diff", trial / "model.py", stability,
+        )
+        assert validate_row(row) == []
+        assert len(row["stability"]["per_seed"]) == 3
 
 
 def test_run_model_rejects_a_previously_scored_semantic_candidate():

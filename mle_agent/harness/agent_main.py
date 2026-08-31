@@ -10,11 +10,13 @@ import argparse
 import difflib
 import json
 import shutil
+import statistics
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from mle_agent.harness.adk_config import configure_google_adk_environment
+from mle_agent.harness.agent_tools import execute_model
 from mle_agent.harness.config import Config, load_config
 from mle_agent.harness.console import console
 from mle_agent.harness.data_view import prepare_train_valid_view
@@ -47,6 +49,7 @@ def _log_row(
     headroom: float,
     code_diff: str,
     code_path: Path,
+    stability: dict | None = None,
 ) -> dict:
     primary = result.metrics.get("primary") if result.metrics else None
     delta = primary - baseline if primary is not None else None
@@ -121,7 +124,79 @@ def _log_row(
         "suggested_next": getattr(result, "suggested_next", ""),
         "execution_attempts": result.executions,
         "recovery_events": recovery_events,
+        # Present only on a new-best row: the winning candidate re-scored on two
+        # extra fixed seeds. The convergence trajectory still uses seed 42 only.
+        "stability": stability,
     }
+
+
+def _stability_across_seeds(
+    candidate_dir: Path, config: Config, primary_metrics: dict
+) -> dict:
+    """Re-score one candidate on the extra fixed seeds and summarise the spread.
+
+    The official seed's metrics are passed in (already computed by the iteration);
+    the other seeds in ``config.AGENT_STABILITY_SEEDS`` are run here. Each run is a
+    full training pass (~13s) but only fires when a candidate becomes the new best.
+    """
+    seeds = list(config.AGENT_STABILITY_SEEDS)
+    per_seed: dict[int, dict | None] = {seeds[0]: dict(primary_metrics)}
+    for seed in seeds[1:]:
+        execution = execute_model(candidate_dir, config, seed=seed)
+        per_seed[seed] = dict(execution.metrics) if execution.success else None
+    primaries = [
+        float(metrics["primary"])
+        for metrics in per_seed.values()
+        if metrics is not None
+    ]
+    return {
+        "seeds": seeds,
+        "primary_mean": statistics.fmean(primaries) if primaries else None,
+        "primary_std": statistics.pstdev(primaries) if len(primaries) > 1 else 0.0,
+        "per_seed": {str(seed): metrics for seed, metrics in per_seed.items()},
+    }
+
+
+# Published FM standard deviation across five seeds (starter kit README line 74).
+PUBLISHED_SEED_STD = 0.0008
+
+
+def render_stability_section(stability: dict | None, best_iteration: int) -> str:
+    """Markdown block reporting the winner's per-seed spread (empty string if none)."""
+    if not stability or best_iteration == 0:
+        return (
+            "## Multi-seed stability\n\n"
+            "No candidate beat the reproduced baseline, so no multi-seed check was run.\n\n"
+        )
+    rows = []
+    for seed, metrics in stability["per_seed"].items():
+        if metrics is None:
+            rows.append(f"| {seed} | failed | failed | failed |")
+        else:
+            rows.append(
+                f"| {seed} | {float(metrics.get('GAUC', 0.0)):.6f} | "
+                f"{float(metrics.get('nDCG@5', 0.0)):.6f} | "
+                f"{float(metrics['primary']):.6f} |"
+            )
+    mean = stability.get("primary_mean")
+    std = stability.get("primary_std") or 0.0
+    header = (
+        "## Multi-seed stability\n\n"
+        f"Winning candidate `trial_{best_iteration:03d}` re-scored on fixed seeds "
+        f"{stability['seeds']} (seed {stability['seeds'][0]} is the sole convergence "
+        "observation).\n\n"
+        "| Seed | GAUC | nDCG@5 | primary |\n"
+        "|---:|---:|---:|---:|\n"
+        + "\n".join(rows)
+        + "\n\n"
+    )
+    if mean is None:
+        return header + "primary mean unavailable (extra-seed runs failed).\n\n"
+    ratio = f"{std / PUBLISHED_SEED_STD:.1f}x" if std else "0.0x"
+    return header + (
+        f"primary mean **{mean:.6f}** ± std **{std:.6f}** "
+        f"({ratio} the published FM 5-seed std of {PUBLISHED_SEED_STD}).\n\n"
+    )
 
 
 def _converged(best_history: list[float], epsilon: float, consecutive: int) -> bool:
@@ -362,6 +437,7 @@ The candidate loop did not start because the autonomous bootstrap failed. See
     best_metrics = dict(bootstrap_result.metrics)
     best_iteration = 0
     best_path = root_path
+    best_stability: dict | None = None
     best_history = [best_primary]
     successful_agent_experiments = 0
     attempted_agent_experiments = 0
@@ -403,6 +479,14 @@ The candidate loop did not start because the autonomous bootstrap failed. See
         primary = float(result.metrics["primary"]) if result.metrics else None
         is_new_best = primary is not None and primary > best_primary
         status = "success" if result.success else "failed"
+        # A new best is re-scored on the extra fixed seeds so the report can state
+        # whether the gain clears published seed noise. Seed 42 alone still drives
+        # convergence (best_history / _converged are untouched).
+        stability = (
+            _stability_across_seeds(trial_dir, config, dict(result.metrics))
+            if (result.success and is_new_best)
+            else None
+        )
         logger.write(_log_row(
             iteration,
             best_iteration,
@@ -413,6 +497,7 @@ The candidate loop did not start because the autonomous bootstrap failed. See
             config.HEADROOM,
             _diff(parent_code, final_code, f"trial_{best_iteration:03d}/model.py", f"trial_{iteration:03d}/model.py"),
             trial_path,
+            stability,
         ))
 
         if result.success:
@@ -422,6 +507,7 @@ The candidate loop did not start because the autonomous bootstrap failed. See
                 best_metrics = dict(result.metrics or {})
                 best_iteration = iteration
                 best_path = trial_path
+                best_stability = stability
                 console.harness(
                     "Experiment result",
                     status="New best candidate",
@@ -517,6 +603,8 @@ The candidate loop did not start because the autonomous bootstrap failed. See
         "best_trial": best_iteration,
         "best_valid_metrics": best_metrics,
         "best_valid_primary": best_primary,
+        "best_trial_stability": best_stability,
+        "stability_seeds": list(config.AGENT_STABILITY_SEEDS),
         "metric_deltas_vs_baseline": metric_deltas,
         "delta_vs_baseline": best_primary - config.BASELINE_PRIMARY,
         "attempted_agent_experiments": attempted_agent_experiments,
@@ -547,6 +635,7 @@ The candidate loop did not start because the autonomous bootstrap failed. See
         )
         for item in trajectory
     )
+    stability_section = render_stability_section(best_stability, best_iteration)
     report_path = logger.write_report(f"""# Single-agent research run {run_id}
 
 ## Outcome
@@ -570,6 +659,7 @@ The candidate loop did not start because the autonomous bootstrap failed. See
 | nDCG@5 | {config.BASELINE_NDCG:.6f} | {float(best_metrics.get('nDCG@5', 0.0)):.6f} | {metric_deltas.get('nDCG@5', 0.0):+.6f} |
 | primary | {config.BASELINE_PRIMARY:.6f} | {best_primary:.6f} | {best_primary - config.BASELINE_PRIMARY:+.6f} |
 
+{stability_section}
 ## Experiment trajectory
 
 | Iteration | Status | Candidate primary | Incumbent primary | New best |
