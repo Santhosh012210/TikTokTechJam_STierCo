@@ -21,7 +21,7 @@ src/test_run*
 experiment_workspace/
 
 # Local datasets
-datasets/KuaiRand-Pure/
+datasets/KuaiRand-Pure
 datasets/KuaiRand-1k/
 datasets/KuaiRand-27k/
 datasets/*.tar.gz
