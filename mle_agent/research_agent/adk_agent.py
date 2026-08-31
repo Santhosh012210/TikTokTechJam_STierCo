@@ -95,6 +95,29 @@ class _FeatureEngineeringContext(BaseModel):
     implementation_boundary: str
 
 
+class _DataQueryFilter(BaseModel):
+    """One bounded filter clause for the ``query_data`` aggregate tool."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str
+    op: str
+    value: str
+
+
+class _TrialConfig(BaseModel):
+    """Data-only hyperparameter overrides the inherited candidate already accepts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    k: int | None = None
+    lr: float | None = None
+    l2: float | None = None
+    epochs: int | None = None
+    batch_size: int | None = None
+    patience: int | None = None
+
+
 class ResearchAgent:
     """One persistent Google ADK agent for the complete research run."""
 
@@ -679,6 +702,40 @@ class ResearchAgent:
             """Create or replace a file inside the current candidate directory."""
             return dispatch("write_file", {"path": path, "content": content})
 
+        def edit_file(
+            path: str, old_text: str, new_text: str, tool_context: ToolContext = None
+        ) -> dict[str, Any]:
+            """Make one exact old-text replacement in a candidate file.
+
+            Prefer this over a full rewrite for a focused change; ``old_text`` must
+            match exactly once. Cheaper than resending the whole file.
+            """
+            return dispatch("edit_file", {
+                "path": path, "old_text": old_text, "new_text": new_text,
+            })
+
+        def query_data(
+            split: Literal["train", "validation"],
+            metrics: list[str],
+            group_by: list[str] | None = None,
+            filters: list[_DataQueryFilter] | None = None,
+            limit: int | None = None,
+            tool_context: ToolContext = None,
+        ) -> dict[str, Any]:
+            """Run one bounded aggregate query over train or validation.
+
+            Returns at most 20 grouped rows and never raw interaction rows. Use only
+            to resolve a specific uncertainty inspect_data left open.
+            """
+            payload: dict[str, Any] = {"split": split, "metrics": metrics}
+            if group_by is not None:
+                payload["group_by"] = group_by
+            if filters is not None:
+                payload["filters"] = [f.model_dump() for f in filters]
+            if limit is not None:
+                payload["limit"] = limit
+            return dispatch("query_data", payload)
+
         def inspect_data(tool_context: ToolContext = None) -> dict[str, Any]:
             """Inspect a deterministic train/validation-only data summary."""
             return dispatch("inspect_data", {})
@@ -767,10 +824,14 @@ class ResearchAgent:
             feature_sources: list[str] | None = None,
             feature_transformations: list[str] | None = None,
             leakage_controls: list[str] | None = None,
+            execution_class: Literal["quick", "normal", "substantial"] = "normal",
+            seed: int | None = None,
+            trial_config: _TrialConfig | None = None,
+            diversity_override: str = "",
             tool_context: ToolContext = None,
         ) -> dict[str, Any]:
             """Execute model.py against train and validation and return metrics/errors."""
-            return dispatch("run_model", {
+            payload: dict[str, Any] = {
                 "hypothesis": hypothesis,
                 "reasoning": reasoning,
                 "literature_chunk_ids": literature_chunk_ids or [],
@@ -781,12 +842,22 @@ class ResearchAgent:
                 "feature_sources": feature_sources or [],
                 "feature_transformations": feature_transformations or [],
                 "leakage_controls": leakage_controls or [],
-            })
+                "execution_class": execution_class,
+                "diversity_override": diversity_override,
+            }
+            # dispatch does int(payload.get("seed", config.SEED)); never send None.
+            if seed is not None:
+                payload["seed"] = seed
+            if trial_config is not None:
+                payload["trial_config"] = trial_config.model_dump(exclude_none=True)
+            return dispatch("run_model", payload)
 
         return [
             discover_task_docs,
             read_file,
             write_file,
+            edit_file,
+            query_data,
             inspect_data,
             inspect_environment,
             request_dependency_install,

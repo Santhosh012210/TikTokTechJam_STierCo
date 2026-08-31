@@ -126,6 +126,32 @@ def test_candidate_process_does_not_receive_google_api_key():
     assert "<missing>" in result.output
 
 
+def test_execute_model_resource_usage_survives_without_resource_module():
+    """On Windows the POSIX `resource` module is absent; execute_model must still run."""
+    config = load_config()
+    original_resource = agent_tools_module.resource
+    agent_tools_module.resource = None
+    try:
+        with tempfile.TemporaryDirectory() as temp:
+            trial = Path(temp)
+            trial.joinpath("model.py").write_text(
+                "import json, argparse\n"
+                "ap=argparse.ArgumentParser(); ap.add_argument('--data_dir'); ap.add_argument('--seed'); "
+                "ap.add_argument('--prediction-path'); ap.add_argument('--trial-config'); a=ap.parse_args()\n"
+                "open(a.prediction_path,'w').write('row_id,user_id,video_id,score\\n')\n"
+                "print(json.dumps({'GAUC': 0.61, 'nDCG@5': 0.60, 'primary': 0.605}))\n",
+                encoding="utf-8",
+            )
+            result = execute_model(trial, config)
+    finally:
+        agent_tools_module.resource = original_resource
+
+    assert result.success
+    assert result.resource_usage["peak_rss_platform_units"] is None
+    assert "cpu_user_seconds" in result.resource_usage
+    assert result.resource_usage["accelerator"] == "not_measured"
+
+
 def test_general_post_file_save_hook_uses_path_matcher_and_file_placeholder():
     with tempfile.TemporaryDirectory() as temp:
         target = Path(temp) / "generated" / "nested" / "example.txt"
@@ -349,6 +375,101 @@ def test_run_model_accepts_a_semantically_changed_candidate():
         assert result["metrics"]["primary"] == 0.605
 
 
+def _dead_end_runtime(temp: str):
+    config = load_config()
+    trial = Path(temp)
+    trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+    runtime = AgentToolRuntime(trial, config, BootstrapState(required=False))
+    runtime.dispatch("write_file", {"path": "model.py", "content": _CHANGED_SCORING_MODEL})
+    return runtime
+
+
+def test_run_model_rejects_repeating_the_measured_capacity_dead_end():
+    with tempfile.TemporaryDirectory() as temp:
+        runtime = _dead_end_runtime(temp)
+        original_execute = agent_tools_module.execute_model
+        calls: list = []
+        agent_tools_module.execute_model = lambda *a, **k: calls.append(1)
+        try:
+            result = json.loads(runtime.dispatch("run_model", {
+                "hypothesis": "Raise the FM embedding dimension k from 16 to 32 for more capacity.",
+                "reasoning": "A larger latent space should capture more interactions.",
+                "target_component": "model",
+            }))
+        finally:
+            agent_tools_module.execute_model = original_execute
+        assert not result["success"]
+        assert result["metrics"] is None
+        assert result["wall_seconds"] == 0.0
+        assert "capacity is not the bottleneck" in result["error"]
+        assert calls == []
+
+
+def test_run_model_allows_a_legitimate_loss_change_after_the_dead_end_guard():
+    with tempfile.TemporaryDirectory() as temp:
+        runtime = _dead_end_runtime(temp)
+        result = json.loads(runtime.dispatch("run_model", {
+            "hypothesis": "Replace pointwise log loss with a per-user BPR pairwise ranking loss.",
+            "reasoning": "Aligns the objective with the ranking metric.",
+            "target_component": "loss",
+        }))
+        assert result["success"]
+        assert result["metrics"]["primary"] == 0.605
+
+
+def test_run_model_rejects_purely_user_side_first_order_features():
+    with tempfile.TemporaryDirectory() as temp:
+        runtime = _dead_end_runtime(temp)
+        result = json.loads(runtime.dispatch("run_model", {
+            "hypothesis": "Add a bucketed user_active_degree feature.",
+            "reasoning": "Sparse users may benefit from a pooled representation.",
+            "target_component": "features",
+            "feature_sources": ["user_active_degree from user_features_pure"],
+            "feature_transformations": ["quantile-bucket user_active_degree on train"],
+            "leakage_controls": ["fit bucket edges on train rows only"],
+        }))
+        assert not result["success"]
+        assert "within-user ranking" in result["error"]
+
+
+def test_run_model_allows_user_side_feature_crossed_with_item_side():
+    with tempfile.TemporaryDirectory() as temp:
+        runtime = _dead_end_runtime(temp)
+        result = json.loads(runtime.dispatch("run_model", {
+            "hypothesis": "Cross user_active_degree with video_id popularity bucket.",
+            "reasoning": "The cross varies within a user and can reorder the list.",
+            "target_component": "features",
+            "feature_sources": ["user_active_degree", "video_id"],
+            "feature_transformations": ["cross user_active_degree x video_id popularity bucket"],
+            "leakage_controls": ["fit on train only"],
+        }))
+        assert result["success"]
+
+
+def test_record_task_context_requires_both_new_measured_dead_ends():
+    config = load_config()
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        model_path = trial / "model.py"
+        model_path.write_text("value = 1\n", encoding="utf-8")
+        resolved = str(model_path.resolve())
+        state = BootstrapState(
+            required=False,
+            required_candidate_model_path=resolved,
+            fully_read_paths={resolved},
+        )
+        runtime = AgentToolRuntime(trial, config, state)
+        payload = _task_context_payload([resolved])
+        payload["feature_engineering_context"]["measured_dead_ends"] = [
+            "The organizer's 13 static fields produced no gain over the five-field baseline.",
+        ]
+        result = json.loads(runtime.dispatch("record_task_context", payload))
+        assert result["error"] == "TASK_CONTEXT_INVALID"
+        errors = " ".join(result["feature_context_errors"])
+        assert "k=8/16/32" in errors
+        assert "user-side first-order" in errors
+
+
 def test_run_model_rejects_a_previously_scored_semantic_candidate():
     config = load_config()
     state = BootstrapState(required=False)
@@ -401,7 +522,9 @@ def _task_context_payload(source_paths: list[str]) -> dict:
                 "user_id", "video_id", "author_id", "tab", "dur_bucket",
             ],
             "measured_dead_ends": [
-                "The organizer's 13 static fields produced no gain over the five-field baseline."
+                "The organizer's 13 static fields produced no gain over the five-field baseline.",
+                "Raising embedding dimension k=8/16/32 stayed flat (~0.589); capacity is not the bottleneck.",
+                "Purely user-side first-order features contribute zero to within-user ranking; they help only through item-side interactions.",
             ],
             "promising_feature_families": [
                 "train-history sequences", "temporal context", "user-item crosses",
@@ -1357,7 +1480,10 @@ def test_installer_targets_only_the_run_venv_with_binary_wheels():
     try:
         with tempfile.TemporaryDirectory() as temp:
             config.RUN_ENV_DIR = Path(temp) / ".venv"
-            config.PYTHON_EXE = str(config.RUN_ENV_DIR / "bin" / "python")
+            config.PYTHON_EXE = str(
+                config.RUN_ENV_DIR
+                / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            )
             agent_tools_module.subprocess.run = fake_run
             agent_tools_module.snapshot_run_environment = (
                 lambda _config, phase: {"success": True, "phase": phase}

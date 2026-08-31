@@ -12,12 +12,17 @@ import csv
 import hashlib
 import json
 import os
-import resource
+import re
 import subprocess
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+
+try:  # POSIX-only; absent on Windows, where os.times() is used instead.
+    import resource
+except ImportError:  # pragma: no cover - platform-dependent
+    resource = None
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
@@ -537,6 +542,64 @@ def semantic_model_fingerprint(path: Path) -> str | None:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+# The starter-kit README (baseline_kuairand-starter-kit/README.md:122-133) records
+# two directions the organizers measured and that add nothing. Prior autonomous
+# runs proposed both anyway. Reject a run_model / run_sweep proposal that repeats one.
+_CAPACITY_NOUNS = (
+    "embedding dim", "embedding dimension", "latent dim", "latent dimension",
+    "n_factors", "num_factors", "factorization dimension", "hidden size",
+)
+_INCREASE_VERBS = (
+    "increase", "raise", "rais", "bigger", "larger", "higher", "grow",
+    "more capacity", "scale up", "widen", "expand",
+)
+_ITEM_SIDE_TOKENS = (
+    "video_id", "video_", "item_id", "item_", "author_id", "author_", "music_id",
+    "tag", "category", "play_progress", "show_cnt", "upload_", "video_type",
+    "video_duration", "dur_bucket", "item_pop", "item pop",
+)
+
+
+def _repeats_measured_dead_end(payload: dict, proposal: dict) -> str | None:
+    """Return a README-quoting rejection reason if the proposal is a known dead end."""
+    text = f"{payload.get('hypothesis', '')} {payload.get('reasoning', '')}".lower()
+    capacity_noun = (
+        any(noun in text for noun in _CAPACITY_NOUNS)
+        or re.search(r"\bk\s*=\s*\d", text) is not None
+        or "capacity" in text
+    )
+    capacity_verb = (
+        any(verb in text for verb in _INCREASE_VERBS)
+        or "->" in text
+        or "→" in text
+    )
+    if capacity_noun and capacity_verb:
+        return (
+            "REJECTED: the starter-kit README records embedding dimension k=8/16/32 as "
+            "flat (0.5895/0.5902/0.5887) -- capacity is not the bottleneck and 1.14M rows "
+            "do not support more. Test a different pipeline component."
+        )
+    if str(proposal.get("target_component", "")).lower() in {"features", "feature"}:
+        sources = " ".join(str(s) for s in proposal.get("feature_sources", [])).lower()
+        transforms = " ".join(
+            str(t) for t in proposal.get("feature_transformations", [])
+        ).lower()
+        touches_user = bool(sources) and (
+            "user_id" in sources or re.search(r"\buser[_ ]", sources) is not None
+        )
+        has_item_side = any(
+            token in sources or token in transforms for token in _ITEM_SIDE_TOKENS
+        )
+        if touches_user and not has_item_side:
+            return (
+                "REJECTED: the starter-kit README records that first-order terms from "
+                "purely user-side features contribute exactly zero to within-user ranking. "
+                "A user-side feature helps only through an interaction with an item-side "
+                "field -- add an item-side cross to feature_transformations."
+            )
+    return None
+
+
 @dataclass
 class ModelExecution:
     success: bool
@@ -555,6 +618,38 @@ def _safe_float_metrics(metrics: dict) -> dict:
     return {
         key: float(value) if isinstance(value, (int, float)) or hasattr(value, "item") else value
         for key, value in metrics.items()
+    }
+
+
+def _sample_child_usage():
+    """Snapshot cumulative child-process resource usage (POSIX or Windows)."""
+    if resource is not None:
+        return resource.getrusage(resource.RUSAGE_CHILDREN)
+    return os.times()
+
+
+def _child_usage_delta(before, after, timeout_seconds: int) -> dict:
+    """Resource reading for one candidate execution.
+
+    On POSIX this is ``RUSAGE_CHILDREN`` (CPU deltas + peak RSS). On Windows
+    ``os.times().children_*`` is always ``0.0`` and there is no child RSS, so the
+    CPU fields read ~0 and ``peak_rss_platform_units`` is ``None``. The field is
+    diagnostic only -- ``ModelExecution.resource_usage`` is never schema-checked.
+    """
+    if resource is not None:
+        return {
+            "cpu_user_seconds": max(0.0, after.ru_utime - before.ru_utime),
+            "cpu_system_seconds": max(0.0, after.ru_stime - before.ru_stime),
+            "peak_rss_platform_units": after.ru_maxrss,
+            "timeout_seconds": timeout_seconds,
+            "accelerator": "not_measured",
+        }
+    return {
+        "cpu_user_seconds": max(0.0, after.children_user - before.children_user),
+        "cpu_system_seconds": max(0.0, after.children_system - before.children_system),
+        "peak_rss_platform_units": None,
+        "timeout_seconds": timeout_seconds,
+        "accelerator": "not_measured",
     }
 
 
@@ -621,7 +716,7 @@ def execute_model(
             encoding="utf-8",
         )
         command.extend(["--trial-config", str(trial_config_path)])
-    before_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    before_usage = _sample_child_usage()
     try:
         result = subprocess.run(
             command,
@@ -647,14 +742,8 @@ def execute_model(
     output = redact_secrets(result.stdout + result.stderr)
     if len(output) > 12_000:
         output = output[-12_000:]
-    after_usage = resource.getrusage(resource.RUSAGE_CHILDREN)
-    usage = {
-        "cpu_user_seconds": max(0.0, after_usage.ru_utime - before_usage.ru_utime),
-        "cpu_system_seconds": max(0.0, after_usage.ru_stime - before_usage.ru_stime),
-        "peak_rss_platform_units": after_usage.ru_maxrss,
-        "timeout_seconds": timeout_seconds,
-        "accelerator": "not_measured",
-    }
+    after_usage = _sample_child_usage()
+    usage = _child_usage_delta(before_usage, after_usage, timeout_seconds)
     if result.returncode != 0:
         error = f"model.py exited {result.returncode}\n{output[-6000:]}"
         return ModelExecution(
@@ -1594,6 +1683,31 @@ class AgentToolRuntime:
                     feature_context_errors.append(
                         "measured_dead_ends must record that the organizer's 13 static fields did not improve the baseline"
                     )
+                # Two further dead ends the starter-kit README (lines 122-133)
+                # rules out and prior runs repeated anyway.
+                if not (
+                    ("capacity" in dead_end_text or "embedding dim" in dead_end_text)
+                    and any(term in dead_end_text for term in (
+                        "k=8", "k = 8", "8/16/32", "8 / 16 / 32", "0.589", "0.590",
+                    ))
+                ):
+                    feature_context_errors.append(
+                        "measured_dead_ends must record that raising embedding dimension "
+                        "k=8/16/32 stayed flat (~0.589) and capacity is not the bottleneck "
+                        "(starter-kit README)"
+                    )
+                if not (
+                    ("user-side" in dead_end_text or "user side" in dead_end_text)
+                    and any(term in dead_end_text for term in (
+                        "first-order", "first order", "within-user", "within user",
+                        "contribute zero", "contributes zero", "constant within",
+                    ))
+                ):
+                    feature_context_errors.append(
+                        "measured_dead_ends must record that purely user-side first-order "
+                        "features contribute zero to within-user ranking and help only "
+                        "through item-side interactions (starter-kit README)"
+                    )
                 boundary = str(feature_context.get("implementation_boundary", "")).lower()
                 if "candidate_data" not in boundary or "model.py" not in boundary:
                     feature_context_errors.append(
@@ -1778,6 +1892,22 @@ class AgentToolRuntime:
                         "FEATURE_EVIDENCE_REQUIRED: feature-oriented experiments must declare "
                         "feature_sources, feature_transformations, and leakage_controls before execution"
                     ),
+                    "wall_seconds": 0.0,
+                    "candidate_changed": True,
+                }
+                self.executions.append(record)
+                return json.dumps(record, ensure_ascii=False, indent=2)
+
+            dead_end_reason = _repeats_measured_dead_end(payload, proposal)
+            if dead_end_reason is not None:
+                record = {
+                    "hypothesis": str(payload.get("hypothesis", "")),
+                    "reasoning": str(payload.get("reasoning", "")),
+                    "literature_chunk_ids": list(payload.get("literature_chunk_ids", [])),
+                    "proposal": proposal,
+                    "success": False,
+                    "metrics": None,
+                    "error": dead_end_reason,
                     "wall_seconds": 0.0,
                     "candidate_changed": True,
                 }

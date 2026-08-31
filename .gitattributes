@@ -1,0 +1,17 @@
+# Default: normalise text in the repo, check out LF (this project targets
+# POSIX and Windows; the harness and tests must behave identically on both).
+* text=auto eol=lf
+
+# The organiser starter kit is a byte-exact vendored reference. Its SHA-256
+# manifest (mle_agent/starter-kit.sha256) is computed on the exact bytes, so
+# these files must never be line-ending converted on any platform.
+baseline_kuairand-starter-kit/** -text
+mle_agent/starter-kit.sha256 -text
+
+# Shell scripts run under bash; keep them LF.
+*.sh text eol=lf
+
+# Data archives / CSVs are binary.
+*.tar.gz binary
+*.zip binary
+*.csv -text

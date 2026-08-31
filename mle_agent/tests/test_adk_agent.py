@@ -19,7 +19,7 @@ import mle_agent.harness.agent_tools as agent_tools_module
 from mle_agent.harness.agent_tools import BootstrapState
 from mle_agent.harness.config import Config
 from mle_agent.harness.evaluation import ScoredPredictions
-from mle_agent.research_agent.adk_agent import ResearchAgent
+from mle_agent.research_agent.adk_agent import ResearchAgent, _TrialConfig
 from mle_agent.tests.recovery_demo import run_recovery_scenario
 
 
@@ -285,6 +285,92 @@ def test_task_context_tool_requires_validation_split_key() -> None:
     }
 
 
+class _CapturingRuntime:
+    """Stand-in for AgentToolRuntime that records dispatch payloads."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    def dispatch(self, name: str, payload: dict) -> str:
+        import json as _json
+        self.calls.append((name, dict(payload)))
+        return _json.dumps({"success": True, "echo": name})
+
+
+def _agent_with_capturing_runtime():
+    agent = ResearchAgent(
+        Config(),
+        model=_StallingBootstrapModel(model="fake-wiring-adk"),
+        bootstrap_state=BootstrapState(required=False),
+    )
+    runtime = _CapturingRuntime()
+    agent._runtime = runtime
+    return agent, runtime
+
+
+def _adk_tool(agent, name: str):
+    return next(tool for tool in agent._agent.tools if tool.__name__ == name)
+
+
+def test_adk_tool_surface_exposes_edit_file_and_query_data() -> None:
+    agent, _ = _agent_with_capturing_runtime()
+    tool_names = {tool.__name__ for tool in agent._agent.tools}
+    assert {"edit_file", "query_data"} <= tool_names
+    for name in ("edit_file", "query_data", "run_model"):
+        # ADK schema generation must not raise on the new signatures.
+        FunctionTool(func=_adk_tool(agent, name))._get_declaration()
+
+
+def test_adk_run_model_wrapper_forwards_seed_trial_config_execution_class() -> None:
+    agent, runtime = _agent_with_capturing_runtime()
+    run_model = _adk_tool(agent, "run_model")
+    run_model(
+        hypothesis="tune capacity of a new GBDT ranker",
+        reasoning="screen k with a bounded config",
+        target_component="model",
+        execution_class="substantial",
+        seed=314,
+        trial_config=_TrialConfig(k=8),
+    )
+    name, payload = runtime.calls[-1]
+    assert name == "run_model"
+    assert payload["seed"] == 314
+    assert payload["trial_config"] == {"k": 8}
+    assert payload["execution_class"] == "substantial"
+
+
+def test_adk_run_model_wrapper_omits_seed_when_not_supplied() -> None:
+    agent, runtime = _agent_with_capturing_runtime()
+    run_model = _adk_tool(agent, "run_model")
+    run_model(
+        hypothesis="switch to per-user BPR pairwise ranking loss",
+        reasoning="align objective with GAUC",
+        target_component="loss",
+    )
+    _name, payload = runtime.calls[-1]
+    assert "seed" not in payload
+    assert "trial_config" not in payload
+    assert payload["execution_class"] == "normal"
+
+
+def test_adk_edit_file_wrapper_routes_to_dispatch() -> None:
+    agent, runtime = _agent_with_capturing_runtime()
+    edit_file = _adk_tool(agent, "edit_file")
+    edit_file(path="model.py", old_text="k=16", new_text="k=32")
+    name, payload = runtime.calls[-1]
+    assert name == "edit_file"
+    assert payload == {"path": "model.py", "old_text": "k=16", "new_text": "k=32"}
+
+
+def test_adk_query_data_wrapper_drops_none_keys() -> None:
+    agent, runtime = _agent_with_capturing_runtime()
+    query_data = _adk_tool(agent, "query_data")
+    query_data(split="train", metrics=["rows", "target_rate"])
+    name, payload = runtime.calls[-1]
+    assert name == "query_data"
+    assert payload == {"split": "train", "metrics": ["rows", "target_rate"]}
+
+
 def test_successful_context_on_last_call_completes_without_summary_call() -> None:
     config = Config()
     with tempfile.TemporaryDirectory() as temp:
@@ -341,7 +427,9 @@ def test_successful_context_on_last_call_completes_without_summary_call() -> Non
                     "user_id", "video_id", "author_id", "tab", "dur_bucket",
                 ],
                 "measured_dead_ends": [
-                    "The organizer's 13 static fields produced no gain."
+                    "The organizer's 13 static fields produced no gain.",
+                    "Raising embedding dimension k=8/16/32 stayed flat (~0.589); capacity is not the bottleneck.",
+                    "Purely user-side first-order features contribute zero to within-user ranking; they help only via item-side interactions.",
                 ],
                 "promising_feature_families": ["train-history sequences"],
                 "leakage_controls": ["Fit transformations on train rows only."],
