@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import mle_agent.harness.agent_main as agent_main_module
 from mle_agent.harness.agent_main import (
     _converged,
+    _emit_sweep_rows,
     _log_row,
     _stability_across_seeds,
     render_stability_section,
@@ -722,6 +723,135 @@ def test_iteration_prompt_renders_research_plan():
         research_plan='[{"hypothesis":"per-user BPR pairwise loss"}]',
     )
     assert "per-user BPR pairwise loss" in rendered.content
+
+
+def _sweep_runtime(temp: str, *, experiments_remaining=None):
+    config = load_config()
+    trial = Path(temp)
+    trial.joinpath("model.py").write_text("value = 1\n", encoding="utf-8")
+    runtime = AgentToolRuntime(
+        trial, config, BootstrapState(required=False), iteration=1,
+        experiments_remaining=experiments_remaining,
+    )
+    runtime.dispatch("write_file", {"path": "model.py", "content": _CHANGED_SCORING_MODEL})
+    return runtime
+
+
+def _fake_sweep_execute(_candidate_dir, _config, *, seed=None, trial_config=None, **_k):
+    k = (trial_config or {}).get("k", 16)
+    return SimpleNamespace(
+        success=True,
+        metrics={"GAUC": 0.61, "nDCG@5": 0.60, "primary": 0.601 + k * 1e-4},
+        error=None, wall_seconds=0.01, seed=seed, trial_config=trial_config,
+        prediction_path=None, prediction_sha256=None, resource_usage={},
+    )
+
+
+def test_run_sweep_appends_one_record_per_config_with_shared_id():
+    with tempfile.TemporaryDirectory() as temp:
+        runtime = _sweep_runtime(temp)
+        original = agent_tools_module.execute_model
+        agent_tools_module.execute_model = _fake_sweep_execute
+        try:
+            result = json.loads(runtime.dispatch("run_sweep", {
+                "hypothesis": "tune FM regularisation",
+                "reasoning": "screen a few k values",
+                "target_component": "training",
+                "trial_configs": [{"k": 8}, {"k": 16}, {"k": 24}, {"k": 32}],
+            }))
+        finally:
+            agent_tools_module.execute_model = original
+        members = [e for e in runtime.executions if e.get("sweep_id")]
+        assert len(members) == 4
+        assert len({e["sweep_id"] for e in members}) == 1
+        assert [e["sweep_member"] for e in members] == [0, 1, 2, 3]
+        assert result["success"] and result["configs_run"] == 4
+        assert result["best_member"] == 3
+        assert len(runtime.bootstrap_state.scored_experiments) == 1
+
+
+def test_run_sweep_rejects_out_of_range_and_bad_keys():
+    with tempfile.TemporaryDirectory() as temp:
+        runtime = _sweep_runtime(temp)
+        one = json.loads(runtime.dispatch("run_sweep", {
+            "hypothesis": "x", "reasoning": "y", "target_component": "training",
+            "trial_configs": [{"k": 8}],
+        }))
+        assert not one["success"] and "INVALID_SWEEP" in one["error"]
+        seven = json.loads(runtime.dispatch("run_sweep", {
+            "hypothesis": "x", "reasoning": "y", "target_component": "training",
+            "trial_configs": [{"k": i} for i in range(7)],
+        }))
+        assert not seven["success"]
+        bad = json.loads(runtime.dispatch("run_sweep", {
+            "hypothesis": "x", "reasoning": "y", "target_component": "training",
+            "trial_configs": [{"k": 8}, {"bogus": 1}],
+        }))
+        assert not bad["success"] and "config 1" in bad["error"]
+
+
+def test_run_sweep_respects_experiments_remaining_cap():
+    with tempfile.TemporaryDirectory() as temp:
+        runtime = _sweep_runtime(temp, experiments_remaining=2)
+        original = agent_tools_module.execute_model
+        agent_tools_module.execute_model = _fake_sweep_execute
+        try:
+            result = json.loads(runtime.dispatch("run_sweep", {
+                "hypothesis": "x", "reasoning": "y", "target_component": "training",
+                "trial_configs": [{"k": 8}, {"k": 16}, {"k": 24}, {"k": 32}],
+            }))
+        finally:
+            agent_tools_module.execute_model = original
+        assert result["configs_run"] == 2
+        assert result["configs_requested"] == 4
+
+
+def test_emit_sweep_rows_writes_rows_budget_and_counts_tokens_once():
+    from mle_agent.research_agent.adk_agent import AgentIterationResult as ADKResult
+    with tempfile.TemporaryDirectory() as temp:
+        trial = Path(temp)
+        (trial / "model.py").write_text(_CHANGED_SCORING_MODEL, encoding="utf-8")
+        result = ADKResult(
+            success=True, hypothesis="sweep FM regularisation",
+            reasoning="screen k", reflection="done",
+            metrics={"GAUC": 0.61, "nDCG@5": 0.60, "primary": 0.6022},
+            executions=[], recovery_events=[],
+            token_counts={"input": 500, "output": 40}, wall_seconds=1.0,
+            error=None, final_code="x = 1\n",
+        )
+        members = []
+        for i in range(4):
+            members.append({
+                "sweep_id": "abc123", "sweep_member": i, "wall_seconds": 0.5,
+                "success": i % 2 == 0,
+                "metrics": {"GAUC": 0.61, "nDCG@5": 0.60, "primary": 0.6020 + i * 1e-4}
+                if i % 2 == 0 else None,
+                "error": None if i % 2 == 0 else "diverged",
+                "hypothesis": "sweep", "reasoning": "screen",
+                "proposal": {"target_component": "training"},
+            })
+        rows: list[dict] = []
+
+        class _CaptureLogger:
+            def write(self, row):
+                # mimic strict validation so a malformed row still fails the test
+                errors = validate_row(row)
+                assert errors == [], errors
+                rows.append(dict(row))
+
+        outcome = _emit_sweep_rows(
+            _CaptureLogger(), members, iteration=1, best_iteration=0, base_result=result,
+            member_diff="--- diff", trial_path=trial / "model.py",
+            baseline_primary=0.6016, headroom=0.2468, incumbent_primary=0.6016,
+        )
+        assert len(rows) == 4
+        assert all(r["sweep_id"] == "abc123" for r in rows)
+        assert rows[1]["tokens"] == {"input": 0, "output": 0}
+        assert rows[0]["tokens"]["input"] > 0
+        assert outcome["attempted_delta"] == 3
+        assert outcome["successful"] == 2
+        assert outcome["failed"] == 2
+        assert outcome["best_member"]["sweep_member"] == 2  # highest primary among 0,2
 
 
 def test_run_model_rejects_a_previously_scored_semantic_candidate():

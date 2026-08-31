@@ -12,6 +12,7 @@ import json
 import shutil
 import statistics
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -197,6 +198,65 @@ def render_stability_section(stability: dict | None, best_iteration: int) -> str
         f"primary mean **{mean:.6f}** ± std **{std:.6f}** "
         f"({ratio} the published FM 5-seed std of {PUBLISHED_SEED_STD}).\n\n"
     )
+
+
+def _emit_sweep_rows(
+    logger: RunLogger,
+    sweep_members: list[dict],
+    *,
+    iteration: int,
+    best_iteration: int,
+    base_result: AgentIterationResult,
+    member_diff: str,
+    trial_path: Path,
+    baseline_primary: float,
+    headroom: float,
+    incumbent_primary: float,
+) -> dict:
+    """Write one evidence row per swept config and return the accounting deltas.
+
+    Each config is one scored variant: one row, one budget charge. Tokens and
+    interventions are counted once (RunLogger accumulates them on every write),
+    so members after the first carry zeroed totals.
+    """
+    for member_index, member in enumerate(sweep_members):
+        m_metrics = member.get("metrics") if member.get("success") else None
+        m_primary = float(m_metrics["primary"]) if m_metrics else None
+        member_result = replace(
+            base_result,
+            executions=[member],
+            metrics=m_metrics,
+            success=bool(member.get("success")),
+            error=member.get("error"),
+            sweep_members=None,
+        )
+        row = _log_row(
+            iteration, best_iteration, member_result,
+            "success" if member.get("success") else "failed",
+            m_primary is not None and m_primary > incumbent_primary,
+            baseline_primary, headroom, member_diff, trial_path,
+        )
+        row["sweep_id"] = member["sweep_id"]
+        row["sweep_member"] = member["sweep_member"]
+        if member_index > 0:
+            row["tokens"] = {"input": 0, "output": 0}
+            row["manual_intervention_count"] = 0
+        logger.write(row)
+
+    successful = [m for m in sweep_members if m.get("success")]
+    best_member = max(
+        successful, key=lambda m: float(m["metrics"]["primary"]), default=None
+    )
+    return {
+        # member 0 was already charged before run_iteration; charge the rest here.
+        "attempted_delta": len(sweep_members) - 1,
+        "successful": len(successful),
+        "failed": len(sweep_members) - len(successful),
+        "best_member": best_member,
+        "sweep_primary": (
+            float(best_member["metrics"]["primary"]) if best_member else None
+        ),
+    }
 
 
 def _converged(best_history: list[float], epsilon: float, consecutive: int) -> bool:
@@ -472,10 +532,65 @@ The candidate loop did not start because the autonomous bootstrap failed. See
             experiment=f"{iteration}/{args.max_iter}",
             inherited_primary=f"{best_primary:.6f}",
         )
+        experiments_remaining = args.max_iter - attempted_agent_experiments + 1
         result = agent.run_iteration(
-            iteration, trial_dir, best_primary, best_primary, args.agent_turns
+            iteration, trial_dir, best_primary, best_primary, args.agent_turns,
+            experiments_remaining=experiments_remaining,
         )
         final_code = result.final_code or parent_code
+        member_diff = _diff(
+            parent_code, final_code,
+            f"trial_{best_iteration:03d}/model.py", f"trial_{iteration:03d}/model.py",
+        )
+
+        sweep_members = getattr(result, "sweep_members", None)
+        if sweep_members:
+            # One agent turn ran a bounded sweep: one evidence row and one
+            # scored-variant charge per config, but exactly one best_history
+            # append so the convergence rule still counts turns, not configs.
+            outcome = _emit_sweep_rows(
+                logger, sweep_members,
+                iteration=iteration, best_iteration=best_iteration,
+                base_result=result, member_diff=member_diff, trial_path=trial_path,
+                baseline_primary=config.BASELINE_PRIMARY, headroom=config.HEADROOM,
+                incumbent_primary=best_primary,
+            )
+            attempted_agent_experiments += outcome["attempted_delta"]
+            successful_agent_experiments += outcome["successful"]
+            failed_agent_experiments += outcome["failed"]
+
+            best_member = outcome["best_member"]
+            sweep_primary = outcome["sweep_primary"]
+            is_new_best = sweep_primary is not None and sweep_primary > best_primary
+            if is_new_best:
+                best_primary = sweep_primary
+                best_metrics = dict(best_member["metrics"])
+                best_iteration = iteration
+                best_path = trial_path
+                best_stability = _stability_across_seeds(
+                    trial_dir, config, dict(best_member["metrics"])
+                )
+                console.harness(
+                    "Sweep result", status="New best candidate",
+                    validation_primary=f"{sweep_primary:.6f}",
+                    configs=len(sweep_members),
+                )
+            else:
+                console.harness(
+                    "Sweep result", status="Configs scored; incumbent retained",
+                    best_primary=f"{best_primary:.6f}", configs=len(sweep_members),
+                )
+            if outcome["successful"]:
+                best_history.append(best_primary)
+            trajectory.append({
+                "iteration": iteration,
+                "status": "success" if outcome["successful"] else "failed",
+                "primary": sweep_primary,
+                "incumbent_primary": best_primary,
+                "is_new_best": is_new_best,
+            })
+            continue
+
         primary = float(result.metrics["primary"]) if result.metrics else None
         is_new_best = primary is not None and primary > best_primary
         status = "success" if result.success else "failed"
@@ -495,7 +610,7 @@ The candidate loop did not start because the autonomous bootstrap failed. See
             is_new_best,
             config.BASELINE_PRIMARY,
             config.HEADROOM,
-            _diff(parent_code, final_code, f"trial_{best_iteration:03d}/model.py", f"trial_{iteration:03d}/model.py"),
+            member_diff,
             trial_path,
             stability,
         ))

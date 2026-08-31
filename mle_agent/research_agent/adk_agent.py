@@ -48,6 +48,9 @@ class AgentIterationResult:
     final_code: str | None
     hypothesis_supported: bool | None = None
     suggested_next: str = ""
+    # Set only when the iteration ran a bounded sweep: one execution record per
+    # trial config, each charged separately by agent_main's accounting bridge.
+    sweep_members: list[dict] | None = None
 
 
 @dataclass
@@ -885,7 +888,44 @@ class ResearchAgent:
                 payload["trial_config"] = trial_config.model_dump(exclude_none=True)
             return dispatch("run_model", payload)
 
-        return [
+        def run_sweep(
+            hypothesis: str,
+            reasoning: str,
+            target_component: Literal[
+                "loss", "sampling", "features", "sequence",
+                "auxiliary-task", "model", "training", "evaluation",
+            ],
+            trial_configs: list[_TrialConfig],
+            literature_chunk_ids: list[str] | None = None,
+            expected_effect: str = "",
+            falsification_criterion: str = "",
+            execution_class: Literal["quick", "normal", "substantial"] = "normal",
+            seed: int | None = None,
+            diversity_override: str = "",
+            tool_context: ToolContext = None,
+        ) -> dict[str, Any]:
+            """Score 2-6 hyperparameter configs of the same candidate code.
+
+            One declared hypothesis, several controlled configs. Each config gets
+            its own trial id and evidence row and is charged to the 50-variant
+            budget. Returns a compact ranked summary, not every full output.
+            """
+            payload: dict[str, Any] = {
+                "hypothesis": hypothesis,
+                "reasoning": reasoning,
+                "target_component": target_component,
+                "trial_configs": [c.model_dump(exclude_none=True) for c in trial_configs],
+                "literature_chunk_ids": literature_chunk_ids or [],
+                "expected_effect": expected_effect,
+                "falsification_criterion": falsification_criterion,
+                "execution_class": execution_class,
+                "diversity_override": diversity_override,
+            }
+            if seed is not None:
+                payload["seed"] = seed
+            return dispatch("run_sweep", payload)
+
+        tools = [
             discover_task_docs,
             read_file,
             write_file,
@@ -900,6 +940,9 @@ class ResearchAgent:
             record_research_backlog,
             run_model,
         ]
+        if self.config.AGENT_ENABLE_SWEEPS:
+            tools.append(run_sweep)
+        return tools
 
     def _bootstrap_progress(self) -> str:
         state = self.bootstrap_state
@@ -1140,6 +1183,7 @@ class ResearchAgent:
         parent_primary: float,
         best_primary: float,
         max_turns: int,
+        experiments_remaining: int | None = None,
     ) -> AgentIterationResult:
         """Run one experiment through ADK's native model/tool event loop."""
         if max_turns <= 0:
@@ -1171,6 +1215,7 @@ class ResearchAgent:
             dependency_approver=self._approve_dependency_install,
             run_deadline=self.run_deadline,
             iteration=iteration,
+            experiments_remaining=experiments_remaining,
         )
         iteration_prompt = render_prompt(
             "iteration.md",
@@ -1323,20 +1368,35 @@ class ResearchAgent:
                 })
 
         final_code = model_path.read_text(encoding="utf-8") if model_path.exists() else None
+        # A bounded sweep produces several execution records sharing a sweep_id.
+        # Hand them to agent_main so each config is logged and budgeted separately;
+        # the iteration's headline metrics come from the best successful member.
+        sweep_members = [
+            item for item in runtime.executions if item.get("sweep_id")
+        ] or None
+        sweep_best = None
+        if sweep_members:
+            sweep_best = max(
+                (m for m in sweep_members if m["success"]),
+                key=lambda m: float(m["metrics"]["primary"]),
+                default=None,
+            )
+        headline = sweep_best if sweep_members else best_execution
         result = AgentIterationResult(
-            success=best_execution is not None,
+            success=headline is not None,
             hypothesis=str(chosen["hypothesis"]) if chosen else "Agent produced no experiment",
             reasoning=str(chosen["reasoning"]) if chosen else "",
             reflection=reflection,
-            metrics=best_execution["metrics"] if best_execution else None,
+            metrics=headline["metrics"] if headline else None,
             executions=runtime.executions,
             recovery_events=recovery_events,
             token_counts=totals,
             wall_seconds=time.time() - started,
-            error=None if best_execution else last_error,
+            error=None if headline else last_error,
             final_code=final_code,
             hypothesis_supported=hypothesis_supported,
             suggested_next=suggested_next,
+            sweep_members=sweep_members,
         )
         chosen_proposal = chosen.get("proposal", {}) if chosen else {}
         self._experiment_memory.append({

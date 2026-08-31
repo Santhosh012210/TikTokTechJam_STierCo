@@ -130,6 +130,11 @@ class Config:
     AGENT_SWEEP_MAX_CONFIGS: int = int(
         os.environ.get("AGENT_SWEEP_MAX_CONFIGS", "6")
     )
+    # Bounded sweeps are off unless explicitly enabled for a run. When unset,
+    # run_sweep is never registered as a tool and the accounting bridge is dead.
+    AGENT_ENABLE_SWEEPS: bool = os.environ.get(
+        "AGENT_ENABLE_SWEEPS", ""
+    ).strip().lower() in {"1", "true", "yes"}
     AGENT_CANDIDATE_ARCHIVE_LIMIT: int = int(
         os.environ.get("AGENT_CANDIDATE_ARCHIVE_LIMIT", "3")
     )

@@ -353,6 +353,23 @@ def test_adk_run_model_wrapper_omits_seed_when_not_supplied() -> None:
     assert payload["execution_class"] == "normal"
 
 
+def test_run_sweep_tool_is_gated_by_the_enable_flag() -> None:
+    off = ResearchAgent(
+        Config(), model=_StallingBootstrapModel(model="fake-sweep-off"),
+        bootstrap_state=BootstrapState(required=False),
+    )
+    assert "run_sweep" not in {tool.__name__ for tool in off._agent.tools}
+
+    config = Config()
+    config.AGENT_ENABLE_SWEEPS = True
+    on = ResearchAgent(
+        config, model=_StallingBootstrapModel(model="fake-sweep-on"),
+        bootstrap_state=BootstrapState(required=False),
+    )
+    assert "run_sweep" in {tool.__name__ for tool in on._agent.tools}
+    FunctionTool(func=_adk_tool(on, "run_sweep"))._get_declaration()
+
+
 def test_adk_edit_file_wrapper_routes_to_dispatch() -> None:
     agent, runtime = _agent_with_capturing_runtime()
     edit_file = _adk_tool(agent, "edit_file")

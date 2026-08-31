@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import uuid
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1158,6 +1159,7 @@ class AgentToolRuntime:
         dependency_installer: Callable[[Config, list[str]], dict[str, object]] | None = None,
         run_deadline: float | None = None,
         iteration: int = 0,
+        experiments_remaining: int | None = None,
     ) -> None:
         self.candidate_dir = candidate_dir
         self.config = config
@@ -1167,6 +1169,9 @@ class AgentToolRuntime:
         # Experiment number this runtime serves; 0 during bootstrap. Used by the
         # first-three diversity gate, which persists onto bootstrap_state.
         self.iteration = int(iteration)
+        # How many of the 50 scored variants the run has left. Bounds a sweep so it
+        # cannot overspend the official budget. None means no caller-enforced cap.
+        self.experiments_remaining = experiments_remaining
         self.bootstrap_state = bootstrap_state or BootstrapState()
         self.dependency_approver = dependency_approver
         self.dependency_installer = dependency_installer or install_python_dependencies
@@ -2125,4 +2130,159 @@ class AgentToolRuntime:
                     "target_component": target_component,
                 })
             return json.dumps(record, ensure_ascii=False, indent=2)
+        if name == "run_sweep":
+            return self._dispatch_run_sweep(payload)
         return f"ERROR: unknown tool {name!r}"
+
+    def _sweep_rejection(self, payload: dict, error: str) -> str:
+        record = {
+            "hypothesis": str(payload.get("hypothesis", "")),
+            "reasoning": str(payload.get("reasoning", "")),
+            "literature_chunk_ids": list(payload.get("literature_chunk_ids", [])),
+            "proposal": {"target_component": str(payload.get("target_component", ""))},
+            "success": False,
+            "metrics": None,
+            "error": error,
+            "wall_seconds": 0.0,
+            "candidate_changed": True,
+        }
+        self.executions.append(record)
+        return json.dumps(record, ensure_ascii=False, indent=2)
+
+    def _dispatch_run_sweep(self, payload: dict) -> str:
+        """Score 2-6 trial configs of the same candidate; each is one logged variant."""
+        if not self.bootstrap_state.complete:
+            return self._bootstrap_rejection("run_sweep")
+        target_component = str(payload.get("target_component", "")).strip().lower()
+        if target_component not in set(RUN_MODEL_COMPONENTS):
+            return self._sweep_rejection(
+                payload, "INVALID_TARGET_COMPONENT: declare one supported pipeline component"
+            )
+        proposal = {
+            "target_component": target_component,
+            "expected_effect": str(payload.get("expected_effect", "")),
+            "falsification_criterion": str(payload.get("falsification_criterion", "")),
+            "rollback_plan": str(payload.get("rollback_plan", "retain incumbent")),
+            "feature_sources": list(payload.get("feature_sources") or []),
+            "feature_transformations": list(payload.get("feature_transformations") or []),
+            "leakage_controls": list(payload.get("leakage_controls") or []),
+        }
+        if self.model_post_save_failed:
+            return self._sweep_rejection(
+                payload, "SKIPPED: model.py failed its PostFileSave check; fix and save first."
+            )
+        fingerprint = semantic_model_fingerprint(self.candidate_dir / "model.py")
+        if fingerprint == self.inherited_model_fingerprint:
+            return self._sweep_rejection(
+                payload, "REJECTED: model.py is semantically unchanged from the inherited candidate."
+            )
+        dead_end = _repeats_measured_dead_end(payload, proposal)
+        if dead_end is not None:
+            return self._sweep_rejection(payload, dead_end)
+        scored_components = {
+            str(item.get("target_component"))
+            for item in self.bootstrap_state.scored_experiments
+        }
+        if (
+            len(scored_components) < 3
+            and target_component in scored_components
+            and not str(payload.get("diversity_override", "")).strip()
+        ):
+            return self._sweep_rejection(
+                payload,
+                f"DIVERSITY_REQUIRED: score three distinct target_components before repeating "
+                f"'{target_component}'. Pass diversity_override with a written justification.",
+            )
+        configs = payload.get("trial_configs")
+        allowed_keys = {"k", "lr", "l2", "epochs", "batch_size", "patience"}
+        if (
+            not isinstance(configs, list)
+            or not 2 <= len(configs) <= self.config.AGENT_SWEEP_MAX_CONFIGS
+        ):
+            return self._sweep_rejection(
+                payload,
+                f"INVALID_SWEEP: trial_configs must be a list of 2 to "
+                f"{self.config.AGENT_SWEEP_MAX_CONFIGS} objects",
+            )
+        for index, cfg in enumerate(configs):
+            if not isinstance(cfg, dict) or set(cfg) - allowed_keys:
+                return self._sweep_rejection(
+                    payload,
+                    f"INVALID_SWEEP: config {index} must be an object using only "
+                    f"{sorted(allowed_keys)}",
+                )
+        cap = len(configs)
+        if self.experiments_remaining is not None:
+            cap = min(cap, max(0, self.experiments_remaining))
+        if cap < 2:
+            return self._sweep_rejection(
+                payload, "WALL_BUDGET_EXHAUSTED: not enough scored-variant budget left for a sweep"
+            )
+        sweep_id = uuid.uuid4().hex
+        requested_seed = int(payload.get("seed", self.config.SEED))
+        execution_class = str(payload.get("execution_class", "normal"))
+        members: list[dict] = []
+        for index in range(cap):
+            grant = self.grant_execution_timeout(execution_class)
+            if not grant["granted"]:
+                break
+            execution = execute_model(
+                self.candidate_dir,
+                self.config,
+                timeout_seconds=int(grant["timeout_seconds"]),
+                seed=requested_seed,
+                trial_config=configs[index],
+            )
+            record = {
+                "hypothesis": str(payload.get("hypothesis", "")),
+                "reasoning": str(payload.get("reasoning", "")),
+                "literature_chunk_ids": list(payload.get("literature_chunk_ids", [])),
+                "proposal": proposal,
+                "success": execution.success,
+                "metrics": execution.metrics,
+                "error": execution.error,
+                "wall_seconds": execution.wall_seconds,
+                "candidate_changed": True,
+                "seed": execution.seed,
+                "trial_config": execution.trial_config,
+                "prediction_path": execution.prediction_path,
+                "prediction_sha256": execution.prediction_sha256,
+                "resource_usage": execution.resource_usage,
+                "execution_class": execution_class,
+                "execution_grant": grant,
+                "sweep_id": sweep_id,
+                "sweep_member": index,
+                "sweep_size": cap,
+            }
+            self.executions.append(record)
+            members.append(record)
+        successful = [m for m in members if m["success"]]
+        if successful and fingerprint is not None:
+            self.bootstrap_state.seen_candidate_fingerprints.add(fingerprint)
+            self.bootstrap_state.scored_experiments.append({
+                "iteration": self.iteration,
+                "target_component": target_component,
+            })
+        best = max(
+            successful, key=lambda m: float(m["metrics"]["primary"]), default=None
+        )
+        return json.dumps({
+            "success": bool(successful),
+            "sweep_id": sweep_id,
+            "configs_run": len(members),
+            "configs_requested": len(configs),
+            "best_member": best["sweep_member"] if best else None,
+            "best_primary": float(best["metrics"]["primary"]) if best else None,
+            "members": [
+                {
+                    "member": m["sweep_member"],
+                    "success": m["success"],
+                    "trial_config": m["trial_config"],
+                    "primary": (
+                        float(m["metrics"]["primary"]) if m["success"] else None
+                    ),
+                    "error": m["error"],
+                }
+                for m in members
+            ],
+        }, ensure_ascii=False, indent=2)
