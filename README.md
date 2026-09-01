@@ -226,51 +226,35 @@ python baseline_kuairand-starter-kit/baseline.py \
 TASK_DEFINITION_CONFIRMED=1 ./mle_agent/scripts/run_official.sh
 ```
 
-The reproduced validation primary should be within ±0.002 of `0.6016`; do not start an official
-run if it is not. The normal profile can reach the eight scored variants required before frontier
-convergence is allowed and enables bounded quota recovery. Its $6 ceiling, like every profile
-budget, can be adjusted with environment variables, for example:
+The reproduced validation primary must be within ±0.002 of `0.6016`; don't start an official run
+if it isn't. The normal profile is sized to reach the eight scored variants that frontier
+convergence requires. Every budget is an environment variable:
 
 ```bash
 AGENT_MAX_ITER=10 AGENT_MAX_RUN_COST_USD=4.00 AGENT_MAX_TURNS=20 \
   ./mle_agent/scripts/run_agent.sh
 ```
 
-Before experiment 1, the harness completes a deterministic bootstrap phase in Python. It discovers the
-starter-kit task documentation, reads the complete README, `baseline.py`, `evaluate.py`,
-`data.py`, `ablation_features.py`, and inherited candidate through explicit pages, inspects
-the train/validation-only data view and its available columns, searches the local literature
-corpus, explicitly reproduces the official baseline, and records one structured task summary.
-That summary must record the five baseline fields and the organizer's measured no-gain result
-for all 13 static fields. The harness blocks edits until this bootstrap is complete; the summary and
-baseline result then stay in the same conversation for every later experiment. Bootstrap defaults
-to 24 model calls and each experiment defaults to 16. Both values must remain positive; exhausting a
-cap ends that phase with an explicit evidence event while preserving completed tools and metrics.
-Provider-quota recovery is bounded to three automatic resumes per invocation. Official unattended
-runs pre-authorize those bounded resumes; development runs can opt in with
-`AGENT_AUTO_RESUME_QUOTA=1`.
-Each quota wait is capped at five minutes; exhausting the resume limit stops the run as
-`provider_unavailable` instead of starting another experiment against the same unavailable provider.
+What a run does, in brief:
 
-Feature engineering reads the filtered `experiment_workspace/<run_id>/candidate_data` through
-`--data_dir`; it never rewrites those CSVs or the organizer starter kit. The agent implements the
-complete feature pipeline in the trial's self-contained `model.py`. Feature-oriented runs must log
-their source columns, exact transformations, and train-only leakage controls before the harness will
-execute them. This supports history/sequence, temporal, auxiliary-signal, watch-time, aggregate,
-and user-item-cross experiments without repeating the measured static-field ablation.
-
-The organizer's NumPy FM is a reference, not an implementation ceiling. Bootstrap also inventories
-the active Python environment without importing heavyweight packages. Experiments may replace the
-model or pipeline with any justified open-source framework allowed by the hackathon brief. Every run
-gets a dedicated venv. Missing packages on the curated ML allowlist—including sklearn, XGBoost,
-LightGBM, PyTorch, Polars, and Optuna—install automatically as binary wheels. Off-allowlist requests
-show their exact specifiers and justification and wait for `y/n`. URLs, extras, environment markers,
-pip flags, source distributions, system installs, and `--user` installs are rejected. Every request
-and outcome is logged, and the resolved environment is written to `environment/requirements.lock.txt`.
-
-When a provider returns a real quota/rate-limit response, an opted-in run waits up to five minutes
-and resumes the same retained session. The hard resume count and wall deadline prevent an
-unattended retry loop from running forever.
+- **Bootstrap.** Before experiment 1, a deterministic Python phase reads the starter kit in full,
+  inspects the train/validation-only data view, searches the method corpus, reproduces the
+  baseline, and records one task summary that stays in context for every later experiment. Edits
+  are blocked until it completes. Caps are 24 model calls for bootstrap and 16 per experiment;
+  exhausting one ends that phase with an explicit evidence event, keeping completed work.
+- **Environment.** Each run gets its own venv. Allowlisted ML packages — sklearn, XGBoost,
+  LightGBM, PyTorch, Polars, Optuna — install as binary wheels automatically; anything else shows
+  its specifier and justification and waits for `y/n`. URLs, extras, pip flags, source
+  distributions, and system or `--user` installs are rejected. The resolved set is written to
+  `environment/requirements.lock.txt`. The organiser's NumPy FM is a reference, not a ceiling.
+- **Feature work.** Candidates read the filtered `candidate_data` view through `--data_dir` and
+  implement the whole pipeline in their own `model.py`, never rewriting the CSVs or the starter
+  kit. A feature run must log its source columns, transformations, and train-only leakage
+  controls before the harness will execute it.
+- **Quota recovery.** On a real rate-limit response an opted-in run waits up to five minutes and
+  resumes the same session, at most three times, then stops as `provider_unavailable` rather than
+  retrying forever. Official runs pre-authorise this; dev runs opt in with
+  `AGENT_AUTO_RESUME_QUOTA=1`.
 
 ---
 
