@@ -6,7 +6,7 @@ python_exe="$repo_dir/.venv/bin/python"
 
 if [[ ! -x "$python_exe" ]]; then
   echo "Missing virtual environment: $python_exe" >&2
-  echo "Follow SETUP.md first." >&2
+  echo "Follow the Setup and run section in README.md first." >&2
   exit 1
 fi
 
