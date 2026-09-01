@@ -140,7 +140,7 @@ context at experiment 9. The harness owns every arrow.
                        one retained task summary
                                 |
   EXPERIMENT LOOP               v
-    1. harness picks a parent node from the frontier       (UCB, noise-scaled)
+    1. harness picks a parent node from the frontier
                                 |
                                 v
     2. agent proposes a hypothesis   <--- cites ---   offline BM25 method corpus
