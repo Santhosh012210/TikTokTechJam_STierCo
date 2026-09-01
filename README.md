@@ -315,45 +315,27 @@ predictions, runs `submit.py --check` for schema/alignment, and never scores hid
 
 ## Reflection: limitations and what we would improve
 
-**The honest size of the win.** +0.0025 validation primary is a real gain — about 3x the
-published seed noise, stable across five seeds — but it is small, and it is a *validation*
-gain. Across experiments we selected repeatedly against the same validation window, so
-some of it is selection bias; the hidden-test transfer is unverified by design. We would not
-describe this as having solved the benchmark, and the oracle ceiling (0.8645) says most of the
-headroom is still there.
+**Limitations.**
 
-**The search stopped early, and the convergence rule let it.** The run declared convergence 
-due to ε = 0.002 with N = 3 is derived from seed variance and is defensible, but it means any genuinely different architecture whose *first* untuned attempt lands within noise gets read as "no gain" and the branch dies. Most of the 19-method corpus — sequence models (SASRec, DIN, SIM), multi-task heads (ESMM, MMoE, PLE), listwise/LambdaRank losses, GBDT ranking — got at most one shot each, at hand-picked hyperparameters. A good idea can lose to a bad learning rate here, and did at least once.
+- The +0.0025 gain is real (3x seed noise, stable over five seeds) but small, and it is a
+  *validation* gain — selected repeatedly against one window, with hidden-test transfer
+  unverified by design. The oracle ceiling of 0.8645 says most of the headroom is untouched.
+- Convergence fired shortly past the eight-variant floor. ε = 0.002 / N = 3 is derived from seed
+  variance and defensible, but it kills any branch whose first untuned attempt lands within noise.
+- Scoring during the search is single-seed; only the winner is re-scored on five. Intermediate
+  keep/revert decisions therefore run at the noise floor.
+- Most of the 19-method corpus got at most one shot at hand-picked hyperparameters, and the
+  corpus itself is a frozen snapshot — the agent cannot propose what we did not write down.
+- 16 turns per experiment means a harder architecture is likelier to be dropped for a fixable bug
+  than an easy one.
 
-**Scoring during search is single-seed.** Only the final winner is re-scored on five seeds.
-Every intermediate keep/revert decision therefore runs at roughly the noise floor, which is
-exactly the failure mode the project notes warn about. 
+**With more time, in priority order:** multi-seed scoring inside the search loop; a second
+held-out window to size the selection bias; a short hyperparameter pass for candidates near the
+incumbent; parallel trials (independent, ~2 min each); cross-run frontier memory; and a fair
+trial for within-user listwise losses and a user-history encoder.
 
-**The agent's knowledge is a frozen snapshot.** Retrieval is offline BM25 over 19 hand-written
-method cards. That buys determinism and reproducible citations, and it costs novelty: the agent
-cannot read a paper published after the corpus was written, and it is anchored toward the
-methods we chose to include.
-
-**Budgets bind.** 16 turns per experiment caps how long a candidate can be debugged before it is
-abandoned. A harder architecture is more likely to be dropped for a fixable bug than an easy one is.
-
-**With more time, in priority order:**
-
-1. **Multi-seed or sequential-test scoring inside the search loop**, not just at the end — so
-   keep/revert decisions stop being made at noise level. This is the single highest-value fix.
-2. **A second held-out validation window** carved from the training range, used only to confirm
-   the final pick, to measure how much of the gain is selection bias.
-3. **A short automatic hyperparameter pass on any candidate that lands near the incumbent**,
-   so architectures are compared at a fair configuration instead of a first guess.
-4. **Parallel trial execution.** Trials are independent and cheap (~2 min each); running four at
-   once turns a 9-experiment run into a 36-experiment one for the same wall clock.
-5. **Cross-run frontier memory** — today each run re-derives the search from the baseline. Seeding
-   a new run with the previous run's frozen frontier compounds progress across runs.
-6. **Live literature retrieval** behind the same citation discipline, so the corpus stops being a
-   ceiling on what the agent can propose.
-7. **Push into the ranking-loss and sequence directions properly** — within-user listwise softmax
-   and a short user-history encoder are the two places the benchmark's structure most obviously
-   rewards, and neither got a fair trial.
+The longer version — how this was built and what broke — is in
+[PROJECT_STORY.md](PROJECT_STORY.md).
 
 ---
 
