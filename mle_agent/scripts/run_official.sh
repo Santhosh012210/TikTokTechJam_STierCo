@@ -15,6 +15,8 @@ AGENT_MAX_ITER=50 \
 AGENT_WALL_HOURS=6 \
 AGENT_BOOTSTRAP_MAX_TURNS=32 \
 AGENT_MAX_TURNS=24 \
+AGENT_AUTO_RESUME_QUOTA="${AGENT_AUTO_RESUME_QUOTA:-1}" \
+AGENT_MAX_RUN_COST_USD="${AGENT_MAX_RUN_COST_USD:-25.00}" \
 exec "$repo_dir/mle_agent/scripts/run_agent.sh" \
   --task-definition-confirmed \
   "$@"

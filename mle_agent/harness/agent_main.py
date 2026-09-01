@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import json
+import math
 import shutil
 import statistics
 import time
@@ -22,13 +24,14 @@ from mle_agent.harness.console import console
 from mle_agent.harness.data_view import prepare_train_valid_view
 from mle_agent.harness.logger import RunLogger
 from mle_agent.harness.provider import make_langchain_client, resolve_langchain_settings
-from mle_agent.harness.root_model import make_root_model_py
+from mle_agent.harness.root_model import assert_organizer_fm_equivalence, make_root_model_py
 from mle_agent.harness.run_environment import (
     create_run_environment,
     snapshot_run_environment,
 )
 from mle_agent.research_agent.agent import AgentIterationResult, ResearchAgent
 from mle_agent.research_agent.experiment_history import HISTORY_PATH
+from mle_agent.research_agent.search.frontier import CandidateFrontier, CandidateNode
 
 
 def _now() -> str:
@@ -55,7 +58,7 @@ def _log_row(
 ) -> dict:
     primary = result.metrics.get("primary") if result.metrics else None
     delta = primary - baseline if primary is not None else None
-    chosen_attempt = next(
+    chosen_attempt = result.selected_execution or next(
         (attempt for attempt in reversed(result.executions) if attempt.get("success")),
         result.executions[-1] if result.executions else {},
     )
@@ -129,13 +132,18 @@ def _log_row(
         "execution_attempts": result.executions,
         "recovery_events": recovery_events,
         # Present only on a new-best row: the winning candidate re-scored on two
-        # extra fixed seeds. The convergence trajectory still uses seed 42 only.
+        # extra fixed seeds. The convergence trajectory still uses seed 0 only.
         "stability": stability,
     }
 
 
 def _stability_across_seeds(
-    candidate_dir: Path, config: Config, primary_metrics: dict
+    candidate_dir: Path,
+    config: Config,
+    primary_metrics: dict,
+    *,
+    trial_config: dict[str, object] | None = None,
+    run_deadline: float | None = None,
 ) -> dict:
     """Re-score one candidate on the extra fixed seeds and summarise the spread.
 
@@ -146,7 +154,20 @@ def _stability_across_seeds(
     seeds = list(config.AGENT_STABILITY_SEEDS)
     per_seed: dict[int, dict | None] = {seeds[0]: dict(primary_metrics)}
     for seed in seeds[1:]:
-        execution = execute_model(candidate_dir, config, seed=seed)
+        timeout_seconds = config.AGENT_NORMAL_EXECUTION_TIMEOUT_S
+        if run_deadline is not None:
+            remaining = run_deadline - time.time() - config.AGENT_WALL_RESERVE_S
+            if remaining < config.AGENT_QUICK_EXECUTION_TIMEOUT_S:
+                per_seed[seed] = None
+                continue
+            timeout_seconds = max(1, min(timeout_seconds, int(remaining)))
+        execution = execute_model(
+            candidate_dir,
+            config,
+            timeout_seconds=timeout_seconds,
+            seed=seed,
+            trial_config=trial_config,
+        )
         per_seed[seed] = dict(execution.metrics) if execution.success else None
     primaries = [
         float(metrics["primary"])
@@ -157,6 +178,7 @@ def _stability_across_seeds(
         "seeds": seeds,
         "primary_mean": statistics.fmean(primaries) if primaries else None,
         "primary_std": statistics.pstdev(primaries) if len(primaries) > 1 else 0.0,
+        "successful_seed_count": len(primaries),
         "per_seed": {str(seed): metrics for seed, metrics in per_seed.items()},
     }
 
@@ -186,7 +208,7 @@ def render_stability_section(stability: dict | None, best_iteration: int) -> str
     std = stability.get("primary_std") or 0.0
     header = (
         "## Multi-seed stability\n\n"
-        f"Winning candidate `trial_{best_iteration:03d}` re-scored on fixed seeds "
+        f"Winning candidate `node_{best_iteration:03d}` re-scored on fixed seeds "
         f"{stability['seeds']} (seed {stability['seeds'][0]} is the sole convergence "
         "observation).\n\n"
         "| Seed | GAUC | nDCG@5 | primary |\n"
@@ -232,12 +254,16 @@ def _emit_sweep_rows(
             success=bool(member.get("success")),
             error=member.get("error"),
             sweep_members=None,
+            selected_execution=member if member.get("success") else None,
         )
         row = _log_row(
             iteration, best_iteration, member_result,
             "success" if member.get("success") else "failed",
             m_primary is not None and m_primary > incumbent_primary,
-            baseline_primary, headroom, member_diff, trial_path,
+            baseline_primary,
+            headroom,
+            member_diff,
+            Path(str(member.get("source_snapshot_path") or trial_path)),
         )
         row["sweep_id"] = member["sweep_id"]
         row["sweep_member"] = member["sweep_member"]
@@ -267,6 +293,199 @@ def _converged(best_history: list[float], epsilon: float, consecutive: int) -> b
         return False
     gains = [best_history[i] - best_history[i - 1] for i in range(1, len(best_history))]
     return all(gain <= epsilon for gain in gains[-consecutive:])
+
+
+def _frontier_converged(
+    history: list[tuple[float, ...]],
+    *,
+    epsilon: float,
+    consecutive: int,
+    completed_experiments: int,
+    minimum_experiments: int,
+) -> bool:
+    """Stop only when the complete top frontier has stalled over a full window."""
+    if completed_experiments < minimum_experiments or len(history) < consecutive + 1:
+        return False
+    old = history[-consecutive - 1]
+    current = history[-1]
+    width = max(len(old), len(current))
+    old_pad = old + (-float("inf"),) * (width - len(old))
+    current_pad = current + (-float("inf"),) * (width - len(current))
+    improvements = [
+        now - before
+        for before, now in zip(old_pad, current_pad)
+        if math.isfinite(before) and math.isfinite(now)
+    ]
+    return bool(improvements) and max(improvements) <= epsilon
+
+
+def _frontier_scores(frontier: CandidateFrontier, top_k: int) -> tuple[float, ...]:
+    return tuple(
+        node.conservative_primary(PUBLISHED_SEED_STD)
+        for node in frontier.leaderboard(
+            top_k=top_k, conservative=True, seed_std=PUBLISHED_SEED_STD
+        )
+    )
+
+
+def _freeze_candidate_bundle(
+    workspace: Path,
+    node_id: int,
+    source: str,
+    *,
+    parent_id: int | None,
+    execution: dict[str, object],
+) -> dict[str, object]:
+    """Persist the exact scored source/config/seed as an immutable frontier node."""
+    bundle_dir = workspace / "frontier" / f"node_{node_id:03d}"
+    if bundle_dir.exists():
+        raise FileExistsError(f"frontier bundle already exists: {bundle_dir}")
+    bundle_dir.mkdir(parents=True)
+    model_path = bundle_dir / "model.py"
+    model_path.write_text(source, encoding="utf-8")
+    source_sha256 = hashlib.sha256(model_path.read_bytes()).hexdigest()
+    expected_sha256 = execution.get("source_sha256")
+    if expected_sha256 and source_sha256 != expected_sha256:
+        raise ValueError(
+            f"frozen source hash {source_sha256} != executed source hash {expected_sha256}"
+        )
+    trial_config = dict(execution.get("trial_config") or {})
+    config_path = bundle_dir / "trial_config.json"
+    config_path.write_text(
+        json.dumps(trial_config, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "schema_version": 1,
+        "node_id": node_id,
+        "parent_id": parent_id,
+        "model_path": str(model_path),
+        "source_sha256": source_sha256,
+        "trial_config_path": str(config_path),
+        "trial_config": trial_config,
+        "seed": int(0 if execution.get("seed") is None else execution["seed"]),
+        "prediction_sha256": execution.get("prediction_sha256"),
+        "execution_id": execution.get("execution_id"),
+    }
+    manifest_path = bundle_dir / "bundle.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return {**manifest, "manifest_path": str(manifest_path)}
+
+
+def _inherit_cross_run_champion(
+    config: Config,
+    workspace: Path,
+    frontier: CandidateFrontier,
+) -> dict[str, object] | None:
+    """Attach the last frozen champion as a verified branch of this run's root."""
+    index_path = config.EXPERIMENT_WORKSPACE_DIR / "champions" / "latest.json"
+    if not index_path.is_file():
+        return None
+    try:
+        pointer = json.loads(index_path.read_text(encoding="utf-8"))
+        champion_dir = Path(str(pointer["champion_dir"])).resolve()
+        champions_root = (config.EXPERIMENT_WORKSPACE_DIR / "champions").resolve()
+        if not champion_dir.is_relative_to(champions_root):
+            raise ValueError("champion path escapes the local champion archive")
+        manifest = json.loads(
+            (champion_dir / "champion.json").read_text(encoding="utf-8")
+        )
+        source_path = champion_dir / "model.py"
+        source = source_path.read_text(encoding="utf-8")
+        source_sha256 = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        if source_sha256 != manifest["source_sha256"]:
+            raise ValueError("champion source hash mismatch")
+        root = frontier.get_node(0)
+        if (
+            source_sha256 == root.source_sha256
+            and dict(manifest.get("trial_config") or {}) == root.trial_config
+            and int(manifest.get("seed", config.SEED)) == root.seed
+        ):
+            return None
+        node = frontier.add_child(
+            0,
+            str(source_path),
+            f"Inherited champion from run {manifest.get('source_run_id', 'unknown')}",
+            target_component=str(manifest.get("target_component", "cross_run_champion")),
+        )
+        bundle = _freeze_candidate_bundle(
+            workspace,
+            node.id,
+            source,
+            parent_id=0,
+            execution={
+                "source_sha256": source_sha256,
+                "trial_config": dict(manifest.get("trial_config") or {}),
+                "seed": int(manifest.get("seed", config.SEED)),
+                "prediction_sha256": manifest.get("prediction_sha256"),
+                "execution_id": manifest.get("execution_id"),
+            },
+        )
+        frontier.freeze_result(
+            node.id,
+            primary=float(manifest["metrics"]["primary"]),
+            status="success",
+            code_path=str(bundle["model_path"]),
+            hypothesis=str(manifest.get("hypothesis") or node.hypothesis),
+            target_component=str(manifest.get("target_component", "cross_run_champion")),
+            source_sha256=source_sha256,
+            trial_config=dict(manifest.get("trial_config") or {}),
+            seed=int(manifest.get("seed", config.SEED)),
+            metrics=dict(manifest["metrics"]),
+            stability=dict(manifest.get("stability") or {}) or None,
+        )
+        return {
+            "source_run_id": manifest.get("source_run_id"),
+            "node_id": node.id,
+            "source_sha256": source_sha256,
+            "champion_dir": str(champion_dir),
+        }
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        console.harness("Cross-run champion ignored", error=str(exc))
+        return None
+
+
+def _archive_cross_run_champion(
+    config: Config,
+    run_id: str,
+    node: CandidateNode,
+) -> Path:
+    """Write a versioned immutable champion and update a small latest pointer."""
+    champion_dir = config.EXPERIMENT_WORKSPACE_DIR / "champions" / run_id
+    champion_dir.mkdir(parents=True, exist_ok=False)
+    source_path = champion_dir / "model.py"
+    shutil.copy2(node.code_path, source_path)
+    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    if source_sha256 != node.source_sha256:
+        raise ValueError("refusing to archive a champion whose source hash changed")
+    (champion_dir / "trial_config.json").write_text(
+        json.dumps(node.trial_config, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    champion_manifest = {
+        "schema_version": 1,
+        "source_run_id": run_id,
+        "source_node_id": node.id,
+        "source_sha256": source_sha256,
+        "hypothesis": node.hypothesis,
+        "target_component": node.target_component,
+        "trial_config": node.trial_config,
+        "seed": node.seed,
+        "metrics": node.metrics,
+        "stability": node.stability,
+    }
+    (champion_dir / "champion.json").write_text(
+        json.dumps(champion_manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    latest_path = champion_dir.parent / "latest.json"
+    latest_path.write_text(
+        json.dumps({"champion_dir": str(champion_dir)}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return champion_dir
 
 
 def main() -> None:
@@ -309,6 +528,7 @@ def main() -> None:
             "--bootstrap-turns must be positive; unlimited bootstrap loops are disabled"
         )
     started = time.time()
+    run_deadline = started + args.wall_hours * 3600
 
     config = load_config()
     if args.data_dir:
@@ -374,6 +594,7 @@ def main() -> None:
     root_dir.mkdir(parents=True, exist_ok=True)
     root_path = root_dir / "model.py"
     root_code = make_root_model_py(config)
+    assert_organizer_fm_equivalence(config, root_code)
     root_path.write_text(root_code, encoding="utf-8")
     agent = ResearchAgent(
         config,
@@ -384,6 +605,7 @@ def main() -> None:
         run_id=run_id,
         # A real scored run is the only thing allowed to write cross-run memory.
         history_path=HISTORY_PATH,
+        run_deadline=run_deadline,
     )
     console.harness(
         "Agent bootstrap",
@@ -420,7 +642,7 @@ def main() -> None:
         )
         failed_results = {
             "run_id": run_id,
-            "architecture": "deterministic_langchain_agent",
+            "architecture": "immutable_candidate_frontier",
             "provider": provider_label,
             "task_definition_confirmed": args.task_definition_confirmed,
             "stop_reason": "bootstrap_failed",
@@ -433,6 +655,11 @@ def main() -> None:
                 "experiment_model_calls": args.agent_turns,
                 "max_quota_resumes_per_invocation": config.AGENT_MAX_QUOTA_RESUMES,
                 "max_quota_wait_seconds": config.AGENT_MAX_QUOTA_WAIT_S,
+                "frontier_branch_trials": config.AGENT_FRONTIER_BRANCH_TRIALS,
+                "frontier_top_k": config.AGENT_FRONTIER_TOP_K,
+                "minimum_experiments_before_convergence": (
+                    config.AGENT_MIN_EXPERIMENTS_BEFORE_CONVERGENCE
+                ),
             },
             "attempted_agent_experiments": 0,
             "successful_agent_experiments": 0,
@@ -473,6 +700,9 @@ The candidate loop did not start because the autonomous bootstrap failed. See
         logger.close()
         raise SystemExit(1)
     root_primary = float(bootstrap_result.metrics["primary"])
+    official_baseline_reference = dict(
+        (agent.bootstrap_state.baseline_execution or {}).get("organizer_reference") or {}
+    )
     console.harness(
         "Baseline accepted",
         validation_primary=f"{root_primary:.6f}",
@@ -501,15 +731,60 @@ The candidate loop did not start because the autonomous bootstrap failed. See
         config.HEADROOM, "", root_path,
     ))
 
-    best_primary = root_primary
-    best_metrics = dict(bootstrap_result.metrics)
-    best_iteration = 0
-    best_path = root_path
-    best_stability: dict | None = None
+    # Seed the immutable frontier with the exact baseline execution bundle.  The
+    # extra fixed seeds make the root comparable to later conservative scores.
+    root_execution = dict(agent.bootstrap_state.baseline_execution or {})
+    root_execution.setdefault("seed", config.SEED)
+    root_execution.setdefault("trial_config", {})
+    root_execution.setdefault(
+        "source_sha256", hashlib.sha256(root_code.encode("utf-8")).hexdigest()
+    )
+    frontier = CandidateFrontier(
+        str(root_path), "Reproduce the official FM baseline"
+    )
+    root_bundle = _freeze_candidate_bundle(
+        workspace, 0, root_code,
+        parent_id=None,
+        execution=root_execution,
+    )
+    root_bundle_dir = Path(str(root_bundle["model_path"])).parent
+    root_stability = _stability_across_seeds(
+        root_bundle_dir, config, dict(bootstrap_result.metrics), trial_config={},
+        run_deadline=run_deadline,
+    )
+    frontier.freeze_result(
+        0,
+        primary=root_primary,
+        status="success",
+        code_path=str(root_bundle["model_path"]),
+        hypothesis="Reproduce the official FM baseline",
+        target_component="baseline",
+        source_sha256=str(root_bundle["source_sha256"]),
+        trial_config={},
+        seed=config.SEED,
+        metrics=dict(bootstrap_result.metrics),
+        stability=root_stability,
+    )
+    inherited_champion = _inherit_cross_run_champion(config, workspace, frontier)
+    if inherited_champion:
+        console.harness(
+            "Cross-run champion inherited",
+            source_run=inherited_champion["source_run_id"],
+            frontier_node=inherited_champion["node_id"],
+        )
+    best_node = frontier.best_node(seed_std=PUBLISHED_SEED_STD)
+    assert best_node is not None
+    best_primary = best_node.primary
+    best_metrics = dict(best_node.metrics)
+    best_iteration = best_node.id
+    best_path = Path(best_node.code_path)
+    best_stability: dict | None = best_node.stability
     best_history = [best_primary]
+    frontier_history = [_frontier_scores(frontier, config.AGENT_FRONTIER_TOP_K)]
     successful_agent_experiments = 0
     attempted_agent_experiments = 0
     failed_agent_experiments = 0
+    aborted_agent_iterations = 0
     stop_reason = "max_iterations"
     trajectory: list[dict[str, object]] = [{
         "iteration": 0,
@@ -520,132 +795,350 @@ The candidate loop did not start because the autonomous bootstrap failed. See
     }]
 
     for iteration in range(1, args.max_iter + 1):
+        if attempted_agent_experiments >= args.max_iter:
+            stop_reason = "max_iterations"
+            break
         if time.time() - started >= args.wall_hours * 3600:
             stop_reason = "wall_clock"
             console.harness("Run stopped", reason="Wall-clock budget reached")
             break
-        if _converged(best_history, config.CONVERGENCE_EPSILON, config.CONVERGENCE_N):
+        if _frontier_converged(
+            frontier_history,
+            epsilon=config.CONVERGENCE_EPSILON,
+            consecutive=config.CONVERGENCE_N,
+            completed_experiments=attempted_agent_experiments,
+            minimum_experiments=config.AGENT_MIN_EXPERIMENTS_BEFORE_CONVERGENCE,
+        ):
             stop_reason = "converged"
-            console.harness("Run stopped", reason="Convergence rule reached")
+            console.harness("Run stopped", reason="Frontier convergence rule reached")
             break
 
-        attempted_agent_experiments += 1
+        # The initial breadth phase deliberately branches independent components
+        # from the baseline. Afterwards exploit/explore among the strongest few
+        # frozen nodes rather than extending one irreversible greedy chain.
+        parent_node = (
+            frontier.get_node(0)
+            if iteration <= config.AGENT_FRONTIER_BRANCH_TRIALS
+            else frontier.select_parent(
+                top_k=config.AGENT_FRONTIER_TOP_K,
+                exploration_c=config.UCB_C,
+                exploration_scale=config.CONVERGENCE_EPSILON,
+                seed_std=PUBLISHED_SEED_STD,
+            )
+        )
         trial_dir = workspace / f"trial_{iteration:03d}"
         trial_dir.mkdir(parents=True, exist_ok=True)
         trial_path = trial_dir / "model.py"
-        shutil.copy2(best_path, trial_path)
+        shutil.copy2(parent_node.code_path, trial_path)
         parent_code = trial_path.read_text(encoding="utf-8")
+        pending_node = frontier.add_child(
+            parent_node.id,
+            str(trial_path),
+            f"Experiment {iteration} pending",
+        )
         console.harness(
             "Experiment start",
             experiment=f"{iteration}/{args.max_iter}",
-            inherited_primary=f"{best_primary:.6f}",
+            parent_node=parent_node.id,
+            inherited_primary=f"{parent_node.primary:.6f}",
+            frontier_best=f"{best_primary:.6f}",
         )
-        experiments_remaining = args.max_iter - attempted_agent_experiments + 1
+        experiments_remaining = args.max_iter - attempted_agent_experiments
+        required_target_component = (
+            config.AGENT_FRONTIER_BRANCH_COMPONENTS[iteration - 1]
+            if iteration <= min(
+                config.AGENT_FRONTIER_BRANCH_TRIALS,
+                len(config.AGENT_FRONTIER_BRANCH_COMPONENTS),
+            )
+            else None
+        )
         result = agent.run_iteration(
-            iteration, trial_dir, best_primary, best_primary, args.agent_turns,
+            iteration, trial_dir, parent_node.primary, best_primary, args.agent_turns,
             experiments_remaining=experiments_remaining,
+            required_target_component=required_target_component,
         )
+        actual_executions = [
+            execution for execution in result.executions
+            if execution.get("execution_attempted")
+        ]
+        attempted_agent_experiments += len(actual_executions)
+        successful_agent_experiments += sum(
+            1 for execution in actual_executions if execution.get("success")
+        )
+        failed_agent_experiments += sum(
+            1 for execution in actual_executions if not execution.get("success")
+        )
+        if not actual_executions:
+            aborted_agent_iterations += 1
         final_code = result.final_code or parent_code
         member_diff = _diff(
             parent_code, final_code,
-            f"trial_{best_iteration:03d}/model.py", f"trial_{iteration:03d}/model.py",
+            f"node_{parent_node.id:03d}/model.py", f"node_{pending_node.id:03d}/model.py",
         )
 
         sweep_members = getattr(result, "sweep_members", None)
+        sweep_outcome = None
         if sweep_members:
             # One agent turn ran a bounded sweep: one evidence row and one
             # scored-variant charge per config, but exactly one best_history
             # append so the convergence rule still counts turns, not configs.
-            outcome = _emit_sweep_rows(
+            sweep_outcome = _emit_sweep_rows(
                 logger, sweep_members,
-                iteration=iteration, best_iteration=best_iteration,
+                iteration=iteration, best_iteration=parent_node.id,
                 base_result=result, member_diff=member_diff, trial_path=trial_path,
                 baseline_primary=config.BASELINE_PRIMARY, headroom=config.HEADROOM,
                 incumbent_primary=best_primary,
             )
-            attempted_agent_experiments += outcome["attempted_delta"]
-            successful_agent_experiments += outcome["successful"]
-            failed_agent_experiments += outcome["failed"]
+            represented_member = result.selected_execution or sweep_members[-1]
+            represented_index = represented_member.get("sweep_member")
+            for member in sweep_members:
+                if member.get("sweep_member") == represented_index:
+                    continue
+                sibling = frontier.add_child(
+                    parent_node.id,
+                    str(trial_path),
+                    str(member.get("hypothesis") or result.hypothesis),
+                    target_component=str(
+                        (member.get("proposal") or {}).get(
+                            "target_component", "unclassified"
+                        )
+                    ),
+                )
+                member_snapshot = (
+                    Path(str(member["source_snapshot_path"]))
+                    if member.get("source_snapshot_path") else None
+                )
+                member_source = (
+                    member_snapshot.read_text(encoding="utf-8")
+                    if member_snapshot is not None and member_snapshot.is_file()
+                    else final_code
+                )
+                member_execution = dict(member)
+                if not member_execution.get("source_sha256"):
+                    member_execution["source_sha256"] = hashlib.sha256(
+                        member_source.encode("utf-8")
+                    ).hexdigest()
+                member_bundle = _freeze_candidate_bundle(
+                    workspace,
+                    sibling.id,
+                    member_source,
+                    parent_id=parent_node.id,
+                    execution=member_execution,
+                )
+                member_metrics = (
+                    dict(member["metrics"])
+                    if member.get("success") and member.get("metrics") else None
+                )
+                frontier.freeze_result(
+                    sibling.id,
+                    primary=(
+                        float(member_metrics["primary"])
+                        if member_metrics is not None else -1.0
+                    ),
+                    status="success" if member_metrics is not None else "failed",
+                    code_path=str(member_bundle["model_path"]),
+                    hypothesis=str(member.get("hypothesis") or result.hypothesis),
+                    target_component=str(
+                        (member.get("proposal") or {}).get(
+                            "target_component", "unclassified"
+                        )
+                    ),
+                    source_sha256=str(member_bundle["source_sha256"]),
+                    trial_config=dict(member.get("trial_config") or {}),
+                    seed=int(
+                        config.SEED if member.get("seed") is None else member["seed"]
+                    ),
+                    metrics=member_metrics,
+                    stability=None,
+                )
 
-            best_member = outcome["best_member"]
-            sweep_primary = outcome["sweep_primary"]
-            is_new_best = sweep_primary is not None and sweep_primary > best_primary
-            if is_new_best:
-                best_primary = sweep_primary
-                best_metrics = dict(best_member["metrics"])
-                best_iteration = iteration
-                best_path = trial_path
-                best_stability = _stability_across_seeds(
-                    trial_dir, config, dict(best_member["metrics"])
-                )
-                console.harness(
-                    "Sweep result", status="New best candidate",
-                    validation_primary=f"{sweep_primary:.6f}",
-                    configs=len(sweep_members),
-                )
-            else:
-                console.harness(
-                    "Sweep result", status="Configs scored; incumbent retained",
-                    best_primary=f"{best_primary:.6f}", configs=len(sweep_members),
-                )
-            if outcome["successful"]:
-                best_history.append(best_primary)
-            trajectory.append({
-                "iteration": iteration,
-                "status": "success" if outcome["successful"] else "failed",
-                "primary": sweep_primary,
-                "incumbent_primary": best_primary,
-                "is_new_best": is_new_best,
-            })
-            continue
+        represented_execution = (
+            result.selected_execution
+            or (actual_executions[-1] if actual_executions else None)
+        )
+        for execution_record in actual_executions:
+            if execution_record is represented_execution or execution_record.get("sweep_id"):
+                continue
+            auxiliary = frontier.add_child(
+                parent_node.id,
+                str(trial_path),
+                str(execution_record.get("hypothesis") or result.hypothesis),
+                target_component=str(
+                    (execution_record.get("proposal") or {}).get(
+                        "target_component", "unclassified"
+                    )
+                ),
+            )
+            auxiliary_snapshot = (
+                Path(str(execution_record["source_snapshot_path"]))
+                if execution_record.get("source_snapshot_path") else trial_path
+            )
+            auxiliary_source = auxiliary_snapshot.read_text(encoding="utf-8")
+            auxiliary_execution = dict(execution_record)
+            if not auxiliary_execution.get("source_sha256"):
+                auxiliary_execution["source_sha256"] = hashlib.sha256(
+                    auxiliary_source.encode("utf-8")
+                ).hexdigest()
+            auxiliary_bundle = _freeze_candidate_bundle(
+                workspace,
+                auxiliary.id,
+                auxiliary_source,
+                parent_id=parent_node.id,
+                execution=auxiliary_execution,
+            )
+            auxiliary_metrics = (
+                dict(execution_record["metrics"])
+                if execution_record.get("success") and execution_record.get("metrics")
+                else None
+            )
+            frontier.freeze_result(
+                auxiliary.id,
+                primary=(
+                    float(auxiliary_metrics["primary"])
+                    if auxiliary_metrics is not None else -1.0
+                ),
+                status="success" if auxiliary_metrics is not None else "failed",
+                code_path=str(auxiliary_bundle["model_path"]),
+                hypothesis=str(execution_record.get("hypothesis") or result.hypothesis),
+                target_component=str(
+                    (execution_record.get("proposal") or {}).get(
+                        "target_component", "unclassified"
+                    )
+                ),
+                source_sha256=str(auxiliary_bundle["source_sha256"]),
+                trial_config=dict(execution_record.get("trial_config") or {}),
+                seed=int(
+                    config.SEED if execution_record.get("seed") is None
+                    else execution_record["seed"]
+                ),
+                metrics=auxiliary_metrics,
+                stability=None,
+            )
 
         primary = float(result.metrics["primary"]) if result.metrics else None
-        is_new_best = primary is not None and primary > best_primary
-        status = "success" if result.success else "failed"
-        # A new best is re-scored on the extra fixed seeds so the report can state
-        # whether the gain clears published seed noise. Seed 42 alone still drives
-        # convergence (best_history / _converged are untouched).
-        stability = (
-            _stability_across_seeds(trial_dir, config, dict(result.metrics))
-            if (result.success and is_new_best)
-            else None
+        previous_raw_best = max(
+            node.primary for node in frontier.leaderboard(top_k=max(1, len(frontier)))
         )
-        logger.write(_log_row(
-            iteration,
-            best_iteration,
-            result,
-            status,
-            is_new_best,
-            config.BASELINE_PRIMARY,
-            config.HEADROOM,
-            member_diff,
-            trial_path,
-            stability,
-        ))
+        is_new_best = primary is not None and primary > previous_raw_best
+        status = "success" if result.success else "failed"
+        stability = None
+        frozen_path = trial_path
+        if result.success:
+            selected = dict(result.selected_execution or {})
+            if not selected:
+                raise RuntimeError("successful iteration has no selected immutable execution")
+            bundle = _freeze_candidate_bundle(
+                workspace,
+                pending_node.id,
+                final_code,
+                parent_id=parent_node.id,
+                execution=selected,
+            )
+            frozen_path = Path(str(bundle["model_path"]))
+            current_best = frontier.best_node(seed_std=PUBLISHED_SEED_STD)
+            should_stabilize = (
+                current_best is None
+                or primary >= current_best.conservative_primary(PUBLISHED_SEED_STD)
+                - config.CONVERGENCE_EPSILON
+            )
+            if should_stabilize:
+                stability = _stability_across_seeds(
+                    frozen_path.parent,
+                    config,
+                    dict(result.metrics or {}),
+                    trial_config=dict(selected.get("trial_config") or {}),
+                    run_deadline=run_deadline,
+                )
+            proposal = selected.get("proposal") or {}
+            frontier.freeze_result(
+                pending_node.id,
+                primary=float(primary),
+                status="success",
+                code_path=str(frozen_path),
+                hypothesis=result.hypothesis,
+                target_component=str(proposal.get("target_component", "unclassified")),
+                source_sha256=str(bundle["source_sha256"]),
+                trial_config=dict(selected.get("trial_config") or {}),
+                seed=int(selected.get("seed") or config.SEED),
+                metrics=dict(result.metrics or {}),
+                stability=stability,
+            )
+        else:
+            failed_execution = dict(
+                represented_execution
+                or (result.executions[-1] if result.executions else {})
+            )
+            failed_snapshot = (
+                Path(str(failed_execution["source_snapshot_path"]))
+                if failed_execution.get("source_snapshot_path") else None
+            )
+            failed_source = (
+                failed_snapshot.read_text(encoding="utf-8")
+                if failed_snapshot is not None and failed_snapshot.is_file()
+                else trial_path.read_text(encoding="utf-8")
+            )
+            failed_execution.setdefault(
+                "source_sha256",
+                hashlib.sha256(failed_source.encode("utf-8")).hexdigest(),
+            )
+            failed_execution.setdefault("trial_config", {})
+            failed_execution.setdefault("seed", config.SEED)
+            failed_bundle = _freeze_candidate_bundle(
+                workspace,
+                pending_node.id,
+                failed_source,
+                parent_id=parent_node.id,
+                execution=failed_execution,
+            )
+            frozen_path = Path(str(failed_bundle["model_path"]))
+            frontier.freeze_result(
+                pending_node.id,
+                primary=-1.0,
+                status="failed",
+                code_path=str(frozen_path),
+                hypothesis=result.hypothesis,
+                target_component="unclassified",
+                source_sha256=str(failed_bundle["source_sha256"]),
+                trial_config=dict(failed_execution.get("trial_config") or {}),
+                seed=int(
+                    config.SEED if failed_execution.get("seed") is None
+                    else failed_execution["seed"]
+                ),
+                metrics=None,
+                stability=None,
+            )
+
+        if not sweep_members:
+            logger.write(_log_row(
+                iteration,
+                parent_node.id,
+                result,
+                status,
+                is_new_best,
+                config.BASELINE_PRIMARY,
+                config.HEADROOM,
+                member_diff,
+                frozen_path,
+                stability,
+            ))
 
         if result.success:
-            successful_agent_experiments += 1
-            if is_new_best:
-                best_primary = primary
-                best_metrics = dict(result.metrics or {})
-                best_iteration = iteration
-                best_path = trial_path
-                best_stability = stability
-                console.harness(
-                    "Experiment result",
-                    status="New best candidate",
-                    validation_primary=f"{primary:.6f}",
-                )
-            else:
-                console.harness(
-                    "Experiment result",
-                    status="Candidate scored; incumbent retained",
-                    validation_primary=f"{primary:.6f}",
-                    best_primary=f"{best_primary:.6f}",
-                )
+            best_node = frontier.best_node(seed_std=PUBLISHED_SEED_STD)
+            assert best_node is not None
+            best_primary = best_node.primary
+            best_metrics = dict(best_node.metrics)
+            best_iteration = best_node.id
+            best_path = Path(best_node.code_path)
+            best_stability = best_node.stability
             best_history.append(best_primary)
+            console.harness(
+                "Experiment result",
+                status=("New raw best" if is_new_best else "Frontier candidate scored"),
+                validation_primary=f"{primary:.6f}",
+                conservative_frontier_best=f"{best_node.conservative_primary():.6f}",
+                selected_node=best_node.id,
+            )
         else:
-            failed_agent_experiments += 1
             console.harness("Experiment failed", error=result.error)
             user_declined = any(
                 event.get("action") == "user_declined_resume"
@@ -655,7 +1148,11 @@ The candidate loop did not start because the autonomous bootstrap failed. See
                 event.get("action") == "quota_resume_limit_exhausted"
                 for event in result.recovery_events
             )
-            if user_declined or quota_resume_exhausted:
+            cost_limit = any(
+                event.get("action") == "cost_limit_exhausted"
+                for event in result.recovery_events
+            )
+            if user_declined or quota_resume_exhausted or cost_limit:
                 trajectory.append({
                     "iteration": iteration,
                     "status": status,
@@ -671,19 +1168,30 @@ The candidate loop did not start because the autonomous bootstrap failed. See
                         else "Provider remained unavailable after bounded quota recovery"
                     ),
                 )
-                stop_reason = "user_stopped" if user_declined else "provider_unavailable"
+                stop_reason = (
+                    "user_stopped" if user_declined
+                    else "cost_limit" if cost_limit
+                    else "provider_unavailable"
+                )
                 break
 
+        frontier_history.append(_frontier_scores(frontier, config.AGENT_FRONTIER_TOP_K))
         trajectory.append({
             "iteration": iteration,
+            "node_id": pending_node.id,
+            "parent_node_id": parent_node.id,
             "status": status,
             "primary": primary,
             "incumbent_primary": best_primary,
             "is_new_best": is_new_best,
         })
 
-    converged = _converged(
-        best_history, config.CONVERGENCE_EPSILON, config.CONVERGENCE_N
+    converged = _frontier_converged(
+        frontier_history,
+        epsilon=config.CONVERGENCE_EPSILON,
+        consecutive=config.CONVERGENCE_N,
+        completed_experiments=attempted_agent_experiments,
+        minimum_experiments=config.AGENT_MIN_EXPERIMENTS_BEFORE_CONVERGENCE,
     )
     if converged and stop_reason == "max_iterations":
         stop_reason = "converged"
@@ -700,9 +1208,10 @@ The candidate loop did not start because the autonomous bootstrap failed. See
         for name, value in baseline_metrics.items()
         if name in best_metrics
     }
+    champion_archive = _archive_cross_run_champion(config, run_id, best_node)
     results = {
         "run_id": run_id,
-        "architecture": "deterministic_langchain_agent",
+        "architecture": "immutable_candidate_frontier",
         "provider": provider_label,
         "task_definition_confirmed": args.task_definition_confirmed,
         "stop_reason": stop_reason,
@@ -714,25 +1223,49 @@ The candidate loop did not start because the autonomous bootstrap failed. See
             "experiment_model_calls": args.agent_turns,
             "max_quota_resumes_per_invocation": config.AGENT_MAX_QUOTA_RESUMES,
             "max_quota_wait_seconds": config.AGENT_MAX_QUOTA_WAIT_S,
+            "frontier_branch_trials": config.AGENT_FRONTIER_BRANCH_TRIALS,
+            "frontier_top_k": config.AGENT_FRONTIER_TOP_K,
+            "minimum_experiments_before_convergence": (
+                config.AGENT_MIN_EXPERIMENTS_BEFORE_CONVERGENCE
+            ),
         },
         "convergence": {
             "epsilon": config.CONVERGENCE_EPSILON,
             "patience": config.CONVERGENCE_N,
             "incumbent_history": best_history,
+            "frontier_history": [list(scores) for scores in frontier_history],
         },
         "baseline_valid_metrics": baseline_metrics,
+        "official_baseline_reference": official_baseline_reference,
+        "official_hidden_test_baseline_metrics": {
+            "GAUC": config.BASELINE_TEST_GAUC,
+            "nDCG@5": config.BASELINE_TEST_NDCG,
+            "primary": config.BASELINE_TEST_PRIMARY,
+        },
         "baseline_valid_primary": config.BASELINE_PRIMARY,
         "reproduced_baseline_valid_primary": root_primary,
         "best_trial": best_iteration,
+        "best_node_id": best_node.id,
         "best_valid_metrics": best_metrics,
         "best_valid_primary": best_primary,
+        "best_conservative_primary": best_node.conservative_primary(PUBLISHED_SEED_STD),
         "best_trial_stability": best_stability,
+        "best_trial_config": best_node.trial_config,
+        "best_seed": best_node.seed,
+        "best_source_sha256": best_node.source_sha256,
+        "best_bundle_manifest": str(best_path.parent / "bundle.json"),
         "stability_seeds": list(config.AGENT_STABILITY_SEEDS),
         "metric_deltas_vs_baseline": metric_deltas,
         "delta_vs_baseline": best_primary - config.BASELINE_PRIMARY,
+        "validation_beats_official_baseline": best_primary > root_primary,
+        "hidden_test_comparison_status": (
+            "unmeasured; only the organizer can determine whether the final submission "
+            "beats published hidden-test primary 0.5946"
+        ),
         "attempted_agent_experiments": attempted_agent_experiments,
         "successful_agent_experiments": successful_agent_experiments,
         "failed_agent_experiments": failed_agent_experiments,
+        "aborted_agent_iterations": aborted_agent_iterations,
         "trajectory": trajectory,
         "tokens": totals["tokens"],
         "gpu_hours": args.gpu_hours,
@@ -740,6 +1273,10 @@ The candidate loop did not start because the autonomous bootstrap failed. See
         "manual_interventions": totals["interventions"],
         "llm_trace": totals["llm_trace"],
         "best_workspace_code_path": str(best_path),
+        "candidate_frontier": frontier.to_dict(),
+        "inherited_champion": inherited_champion,
+        "champion_archive": str(champion_archive),
+        "provider_cost": agent.provider_cost,
         "prompt_templates": agent.prompt_evidence,
         "task_context_bootstrap": agent.bootstrap_evidence,
         "data_view_manifest": split_manifest,
@@ -768,8 +1305,11 @@ The candidate loop did not start because the autonomous bootstrap failed. See
 - Starter Kit task definition confirmed: {str(args.task_definition_confirmed).lower()}
 - Reproduced FM baseline validation primary: {root_primary:.6f}
 - Best validation primary: {best_primary:.6f}
-- Delta versus published baseline: {best_primary - config.BASELINE_PRIMARY:+.6f}
-- Best trial: trial_{best_iteration:03d}
+- Best conservative primary: {best_node.conservative_primary(PUBLISHED_SEED_STD):.6f}
+- Delta versus published validation baseline: {best_primary - config.BASELINE_PRIMARY:+.6f}
+- Published hidden-test baseline primary: {config.BASELINE_TEST_PRIMARY:.6f}
+- Hidden-test win status: unmeasured (no hidden labels are exposed to the agent)
+- Best frozen frontier node: node_{best_iteration:03d}
 - Attempted autonomous experiments: {attempted_agent_experiments}
 - Successful autonomous experiments: {successful_agent_experiments}
 - Failed autonomous experiments: {failed_agent_experiments}
@@ -821,10 +1361,14 @@ The candidate loop did not start because the autonomous bootstrap failed. See
 
 ## Architecture
 
-The deterministic Python loop owned phase transitions, phase-aware memory, and retry,
-while LangChain supplied the model adapter, unified usage accounting, Pydantic-derived
-tool schemas, and schema-constrained structured output. The retained Python harness
-enforced budgets, validation-only execution, baseline verification, and evidence logging.
+The deterministic Python loop owns an immutable candidate tree. Early experiments branch
+from the baseline, later experiments choose among the conservative top frontier with a
+noise-scaled UCB score, and rewards/visits propagate through each candidate's lineage.
+Every scored node freezes the exact executed source, trial configuration, seed, metrics,
+and parent. Final selection is the strongest conservative frozen node, never the latest
+working file. LangChain supplies the model adapter and structured tool calls; the retained
+Python harness enforces budgets, validation-only execution, baseline verification, and
+evidence logging.
 """)
     logger.close()
     console.harness(

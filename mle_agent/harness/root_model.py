@@ -1,6 +1,8 @@
 """Deterministic FM root candidate used before autonomous experiments."""
 from __future__ import annotations
 
+import ast
+
 from mle_agent.harness.config import Config
 
 
@@ -91,6 +93,7 @@ class FM:
             Vv *= b2; Vv += (1 - b2) * (G * G)
             P -= self.lr * (M / (1 - b1 ** self.t)) / (np.sqrt(Vv / (1 - b2 ** self.t)) + eps)
         self.b -= self.lr * g.sum()
+        return float(-np.mean(y * np.log(sigmoid(z) + 1e-9) + (1 - y) * np.log(1 - sigmoid(z) + 1e-9)))
 
     def predict(self, X, bs=200_000):
         return np.concatenate([self.logits(X[i:i + bs])[0] for i in range(0, len(X), bs)])
@@ -153,4 +156,25 @@ if a.submission_path:
 '''
 
 
-__all__ = ["make_root_model_py"]
+def assert_organizer_fm_equivalence(config: Config, candidate_source: str) -> None:
+    """Fail if the candidate-contract adapter changes the organizer's FM class."""
+    organizer_tree = ast.parse(
+        (config.BASELINE_ROOT / "baseline.py").read_text(encoding="utf-8")
+    )
+    candidate_tree = ast.parse(candidate_source)
+
+    def fm_class(tree: ast.Module) -> ast.ClassDef:
+        return next(
+            node for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "FM"
+        )
+
+    organizer_fm = ast.dump(fm_class(organizer_tree), include_attributes=False)
+    candidate_fm = ast.dump(fm_class(candidate_tree), include_attributes=False)
+    if candidate_fm != organizer_fm:
+        raise RuntimeError(
+            "root candidate FM differs from the organizer-provided baseline.py"
+        )
+
+
+__all__ = ["assert_organizer_fm_equivalence", "make_root_model_py"]

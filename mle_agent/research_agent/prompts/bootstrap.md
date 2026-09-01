@@ -7,18 +7,10 @@ ${remaining_work}
 
 ${bootstrap_digest}
 
-Experiments already measured in earlier runs of this agent (harness-written
-operational log, includes failures — treat settled outcomes as settled):
+Reviewed research knowledge from earlier runs. Use this concise interpretation when
+building the backlog; the raw operational ledger is not a research-prioritization prompt:
 
-```json
-${cross_run_history}
-```
-
-Verified prior autonomous-run evidence (audited, read-only):
-
-```json
-${prior_experiment_evidence}
-```
+${prior_findings}
 
 Interpret the reproduced baseline score, then call `record_task_context`.
 Its `data_splits` object must use exactly the keys `train`, `validation`, and `test`.

@@ -1,0 +1,30 @@
+{
+  "query": "within-user recommendation sampled softmax listwise ranking loss hard negative nDCG implementation",
+  "results": [
+    {
+      "chunk_id": "listwise-softmax#what-it-is",
+      "method": "listwise-softmax",
+      "title": "Listwise softmax over a user's impressions",
+      "section": "What it is",
+      "score": 14.5523,
+      "text": "Treat one user's impression list as a single training example. Score every item in the\nlist, take a softmax over those scores, and maximise the log-probability mass on the\npositive items:\n\n    p = softmax(s_1 ... s_n)          # over one user's n impressions\n    L = -sum over positives of log(p_i)\n\nWhere pairwise loss looks at two items at a time, listwise looks at the whole list at\nonce, so a positive is pushed above *all* negatives in the list simultaneously rather\nthan one sampled negative at a time."
+    },
+    {
+      "chunk_id": "listwise-softmax#why-it-helps-a-ranking-metric",
+      "method": "listwise-softmax",
+      "title": "Listwise softmax over a user's impressions",
+      "section": "Why it helps a ranking metric",
+      "score": 11.7363,
+      "text": "nDCG@5 is a position-sensitive metric: it cares most about the very top of each user's\nlist. Pairwise loss treats all inversions equally — swapping ranks 1 and 2 costs the\nsame as swapping 40 and 41. Softmax loss weights gradients by `p_i`, which concentrates\non the items the model currently ranks highly, so its gradient pressure is naturally\nbiased towards the top of the list where nDCG@5 is decided.\n\nLike BPR, it is shift-invariant within a user: adding a constant to every score in a\nlist leaves the softmax unchanged, so user-constant terms contribute no gradient."
+    },
+    {
+      "chunk_id": "negative-sampling#what-it-is",
+      "method": "negative-sampling",
+      "title": "Negative sampling strategies",
+      "section": "What it is",
+      "score": 10.6049,
+      "text": "Any pairwise or listwise ranking loss needs negatives to contrast positives against. How\nthose negatives are chosen changes what the model learns, often more than the choice of\nloss function.\n\nMain strategies:\n\n- **Uniform within group**: sample uniformly from the same user's observed negative\n  impressions.\n- **Popularity-weighted**: sample proportional to item frequency raised to a power,\n  making popular items more likely negatives, which counteracts popularity bias.\n- **Hard negatives**: sample from items the model currently scores highly but which are\n  labelled negative. Strongest gradient signal per sample.\n- **In-batch negatives**: reuse other rows in the batch as negatives. Nearly free, but\n  they come from other users."
+    }
+  ],
+  "bootstrap_counted": true
+}

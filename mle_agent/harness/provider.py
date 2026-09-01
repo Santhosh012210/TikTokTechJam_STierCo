@@ -90,6 +90,14 @@ _MODEL_PRICES_USD_PER_MILLION: dict[str, dict[str, float]] = {
         "cached_input": 0.25,
         "output": 15.00,
     },
+    # Registered non-OpenAI providers are deliberately limited to model IDs
+    # with an explicit audited cost entry; arbitrary IDs fail closed below.
+    "claude-sonnet-4-5-20250929": {
+        "input": 3.00, "cached_input": 0.30, "output": 15.00,
+    },
+    "gemini-2.5-pro": {
+        "input": 1.25, "cached_input": 0.125, "output": 10.00,
+    },
 }
 
 

@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from io import StringIO
@@ -22,6 +23,7 @@ import mle_agent.harness.agent_tools as agent_tools_module
 from mle_agent.harness.agent_tools import (
     AgentToolRuntime,
     BootstrapState,
+    candidate_execution_fingerprint,
     execute_model,
     inspect_ml_environment,
     inspect_train_valid_data,
@@ -37,8 +39,9 @@ from mle_agent.harness.data_view import (
 )
 from mle_agent.harness.hooks import PostFileSaveHook, run_post_file_save_hooks
 from mle_agent.harness.evaluation import ScoredPredictions
+from mle_agent.harness.finalize import _submission_candidates
 from mle_agent.harness.logger import RunLogger
-from mle_agent.harness.root_model import make_root_model_py
+from mle_agent.harness.root_model import assert_organizer_fm_equivalence, make_root_model_py
 from mle_agent.harness.run_environment import (
     AUTO_INSTALL_ALLOWLIST,
     create_run_environment,
@@ -58,6 +61,7 @@ from mle_agent.harness.tools import exec_write_file
 from mle_agent.harness.validator import scan_candidate_source, validate_row
 from mle_agent.research_agent.agent import ResearchAgent, _console_reasoning_line
 from mle_agent.research_agent.prompts import render_prompt
+from mle_agent.research_agent.search.frontier import CandidateFrontier
 
 
 def _fake_trusted_scorer(path, *_args, **_kwargs):
@@ -729,7 +733,7 @@ def test_record_task_context_requires_both_new_measured_dead_ends():
         assert "user-side first-order" in errors
 
 
-def test_stability_across_seeds_runs_the_two_extra_seeds():
+def test_stability_across_seeds_runs_the_four_extra_organizer_seeds():
     config = load_config()
     seen_seeds: list[int] = []
 
@@ -749,13 +753,13 @@ def test_stability_across_seeds_runs_the_two_extra_seeds():
     finally:
         agent_main_module.execute_model = original
 
-    assert seen_seeds == [314, 2718]  # seed 42 metrics are passed in, not re-run
-    assert set(out["per_seed"]) == {"42", "314", "2718"}
+    assert seen_seeds == [1, 2, 3, 4]  # seed 0 metrics are passed in, not re-run
+    assert set(out["per_seed"]) == {"0", "1", "2", "3", "4"}
     assert out["primary_mean"] is not None
     assert out["primary_std"] >= 0.0
     section = render_stability_section(out, best_iteration=3)
     assert "Multi-seed stability" in section
-    assert "trial_003" in section
+    assert "node_003" in section
 
 
 def test_stability_section_handles_no_new_best():
@@ -973,8 +977,7 @@ def test_iteration_prompt_renders_research_plan():
         parent_primary="0.601600", best_primary="0.601600", max_turns=8,
         stage_instruction="x", experiment_ledger="[]",
         research_plan='[{"hypothesis":"per-user BPR pairwise loss"}]',
-        prior_experiment_evidence='{"evidence_id":"prior-run:test"}',
-        cross_run_history="{}",
+        prior_findings="Things that showed improvement",
     )
     assert "per-user BPR pairwise loss" in rendered.content
 
@@ -1728,7 +1731,7 @@ def test_single_agent_owns_a_persistent_tool_loop():
         assert client.calls == 2
         assert result.reflection == "The unified loop returned metrics."
         assert {item["name"] for item in agent.prompt_evidence} == {
-            "agent.md", "iteration.md"
+            "agent.md", "prior_findings.md", "iteration.md"
         }
         row = _log_row(
             1, 0, result, "success", True, 0.6016, 0.2468,
@@ -1900,6 +1903,47 @@ def test_provider_errors_receive_exactly_one_retry():
         assert trace_responses[0]["provider_call_attempt"] == 2
 
 
+def test_unattended_quota_recovery_is_bounded_and_resumes_the_same_call():
+    class QuotaClient(LLMClient):
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, messages, tools=None, max_tokens=4096):
+            self.calls += 1
+            if self.calls <= 2:
+                raise RuntimeError("rate limit error code: 429")
+            return LLMResponse(
+                text="resumed", tool_calls=[], stop_reason="end_turn",
+                input_tokens=1, output_tokens=1,
+            )
+
+        def add_response_to_history(self, messages, response):
+            return None
+
+        def add_tool_results_to_history(self, messages, tool_calls, outputs):
+            return None
+
+    config = load_config()
+    config.AGENT_AUTO_RESUME_QUOTA = True
+    config.AGENT_MAX_QUOTA_RESUMES = 1
+    client = QuotaClient()
+    trace = []
+    agent = ResearchAgent(
+        config,
+        client=client,
+        provider_retry_delay_s=0,
+        rate_limit_retry_delay_s=0,
+        bootstrap_state=BootstrapState(required=False),
+        event_writer=trace.append,
+    )
+    recovery = []
+    response = agent._complete_with_one_retry([], 32, recovery, "quota_test")
+    assert response.text == "resumed"
+    assert client.calls == 3
+    assert [event["action"] for event in recovery] == ["retry_once", "quota_pause"]
+    assert sum(event.get("event_type") == "quota_pause" for event in trace) == 1
+
+
 def test_prompt_templates_render_and_have_a_stable_hash():
     first = render_prompt(
         "iteration.md",
@@ -1911,8 +1955,7 @@ def test_prompt_templates_render_and_have_a_stable_hash():
         stage_instruction="Perform EDA.",
         experiment_ledger="[]",
         research_plan="[]",
-        prior_experiment_evidence='{"evidence_id":"prior-run:test"}',
-        cross_run_history="{}",
+        prior_findings="Things that showed improvement",
     )
     second = render_prompt(
         "iteration.md",
@@ -1924,17 +1967,15 @@ def test_prompt_templates_render_and_have_a_stable_hash():
         stage_instruction="Use prior evidence.",
         experiment_ledger='[{"iteration":1,"primary":0.602}]',
         research_plan='[{"hypothesis":"per-user BPR"}]',
-        prior_experiment_evidence='{"evidence_id":"prior-run:test"}',
-        cross_run_history="{}",
+        prior_findings="Things that did not show improvement",
     )
     assert "experiment `1`" in first.content
     assert first.template_sha256 == second.template_sha256
     assert len(first.template_sha256) == 64
 
 
-def test_prior_experiment_evidence_is_injected_with_attribution_warning():
+def test_curated_prior_findings_replace_raw_history_in_the_agent_prompt():
     from mle_agent.research_agent.prior_evidence import (
-        compact_prior_experiment_evidence,
         load_prior_experiment_evidence,
     )
 
@@ -1945,6 +1986,7 @@ def test_prior_experiment_evidence_is_injected_with_attribution_warning():
     assert payload["retained_winner"]["training_objective_verified_from_source"].startswith(
         "pointwise sigmoid/BCE"
     )
+    findings = render_prompt("prior_findings.md")
     rendered = render_prompt(
         "iteration.md",
         iteration=1,
@@ -1955,11 +1997,14 @@ def test_prior_experiment_evidence_is_injected_with_attribution_warning():
         stage_instruction="Use prior evidence.",
         experiment_ledger="[]",
         research_plan="[]",
-        prior_experiment_evidence=compact_prior_experiment_evidence(),
-        cross_run_history="{}",
+        prior_findings=findings.content,
     )
-    assert "0.6037182173239961" in rendered.content
-    assert "incorrect BPR attribution" in rendered.content
+    assert "## Things that showed improvement" in rendered.content
+    assert "## Things that did not show improvement" in rendered.content
+    assert "0.604068" in rendered.content
+    assert "negative-negative pairs" in rendered.content
+    assert '"total_recorded"' not in rendered.content
+    assert findings.name == "prior_findings.md"
 
 
 def test_inspect_data_exposes_candidate_feature_sources_without_hidden_rows():
@@ -2090,6 +2135,35 @@ def test_run_environment_is_dedicated_and_writes_a_resolved_lock():
         assert completed["success"]
         assert config.PYTHON_EXE != base_python
         assert Path(config.PYTHON_EXE).is_relative_to((workspace / ".venv").resolve())
+        # The run venv inherits the base environment through a .pth file. Verify
+        # that its core numerical dependency is genuinely importable, not merely
+        # visible to ``pip freeze``.
+        imported = subprocess.run(
+            [config.PYTHON_EXE, "-c", "import numpy; print(numpy.__version__)"],
+            cwd=str(workspace),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert imported.returncode == 0, imported.stderr
+        assert imported.stdout.strip()
+        trial = workspace / "trial_000"
+        trial.mkdir()
+        trial.joinpath("model.py").write_text(
+            "import argparse, numpy as np\n"
+            "ap=argparse.ArgumentParser(); ap.add_argument('--data_dir'); ap.add_argument('--seed'); "
+            "ap.add_argument('--prediction-path'); ap.add_argument('--trial-config'); a=ap.parse_args()\n"
+            "assert np.__version__\n"
+            "open(a.prediction_path,'w').write('row_id,user_id,video_id,score\\n')\n",
+            encoding="utf-8",
+        )
+        original_scorer = agent_tools_module.score_validation_predictions
+        agent_tools_module.score_validation_predictions = _fake_trusted_scorer
+        try:
+            execution = execute_model(trial, config, timeout_seconds=30)
+        finally:
+            agent_tools_module.score_validation_predictions = original_scorer
+        assert execution.success, execution.error
         assert Path(str(completed["requirements_lock"])).is_file()
         manifest = json.loads(
             (artifact_run / "environment" / "manifest.json").read_text()
@@ -2621,6 +2695,138 @@ def test_finalization_refuses_runs_it_must_not_promote():
                 assert "run metrics not found" in str(exc)
         finally:
             finalize_module.Config.ARTIFACTS_DIR = original_artifacts
+
+
+def test_finalization_orders_frozen_submission_candidates_conservatively():
+    metrics = {
+        "architecture": "immutable_candidate_frontier",
+        "submission_repairs": [{
+            "id": 10, "status": "success", "frozen": True,
+            "code_path": "repair.py", "source_sha256": "repair",
+            "conservative_primary": 0.604,
+            "submission_ready_verified": True,
+        }],
+        "candidate_frontier": {"nodes": {
+            "9": {
+                "id": 9, "status": "success", "frozen": True,
+                "code_path": "latest.py", "source_sha256": "latest",
+                "conservative_primary": 0.601,
+            },
+            "3": {
+                "id": 3, "status": "success", "frozen": True,
+                "code_path": "strong.py", "source_sha256": "strong",
+                "conservative_primary": 0.604,
+            },
+            "7": {
+                "id": 7, "status": "failed", "frozen": True,
+                "code_path": "failed.py", "source_sha256": "failed",
+                "conservative_primary": 0.9,
+            },
+        }},
+    }
+
+    candidates = _submission_candidates(metrics)
+
+    assert [candidate["id"] for candidate in candidates] == [10, 3, 9]
+
+
+def test_candidate_execution_identity_includes_seed_and_trial_config():
+    base = candidate_execution_fingerprint("source", seed=42, trial_config={"k": 8})
+    assert base != candidate_execution_fingerprint(
+        "source", seed=314, trial_config={"k": 8}
+    )
+    assert base != candidate_execution_fingerprint(
+        "source", seed=42, trial_config={"k": 16}
+    )
+
+
+def test_harness_pins_the_real_organizer_fm_and_separates_valid_from_hidden_rungs():
+    config = load_config()
+    scores = json.loads(config.BASELINE_JSON.read_text(encoding="utf-8"))["scores"]
+    fm = scores["fm_official"]
+    assert fm["config"] == {
+        "model": "FM", "k": 16, "lr": 0.001, "batch": 8192,
+        "max_epochs": 40, "patience": 4,
+        "fields": ["user_id", "video_id", "author_id", "tab", "dur_bucket"],
+    }
+    assert config.SEED == 0
+    assert config.AGENT_STABILITY_SEEDS == (0, 1, 2, 3, 4)
+    assert config.BASELINE_PRIMARY == fm["valid"]["primary"] == 0.6016
+    assert config.BASELINE_TEST_PRIMARY == fm["test"]["primary"] == 0.5946
+    assert config.RANDOM_PRIMARY == scores["random"]["valid"]["primary"] == 0.4834
+    assert config.RANDOM_TEST_PRIMARY == scores["random"]["test"]["primary"] == 0.4753
+    assert config.POPULARITY_PRIMARY == scores["item_popularity"]["valid"]["primary"] == 0.5807
+    assert config.POPULARITY_TEST_PRIMARY == scores["item_popularity"]["test"]["primary"] == 0.5715
+    root_source = make_root_model_py(config)
+    assert_organizer_fm_equivalence(config, root_source)
+    assert "trial.get('k', 16)" in root_source
+    assert "trial.get('lr', 0.001)" in root_source
+    assert "trial.get('batch_size', 8192)" in root_source
+    assert "trial.get('epochs', 40)" in root_source
+    assert "trial.get('patience', 4)" in root_source
+
+
+def test_candidate_frontier_freezes_identity_and_backpropagates_rewards():
+    frontier = CandidateFrontier("root.py", "baseline")
+    frontier.freeze_result(
+        0, primary=0.60, status="success", code_path="root.py",
+        hypothesis="baseline", target_component="baseline", source_sha256="root",
+        trial_config={}, seed=42, metrics={"primary": 0.60},
+        stability={"primary_mean": 0.60, "primary_std": 0.001},
+    )
+    first = frontier.add_child(0, "first.py", "loss")
+    frontier.freeze_result(
+        first.id, primary=0.61, status="success", code_path="first.py",
+        hypothesis="loss", target_component="loss", source_sha256="first",
+        trial_config={"loss": "bpr"}, seed=42, metrics={"primary": 0.61},
+        stability={"primary_mean": 0.608, "primary_std": 0.001},
+    )
+    grandchild = frontier.add_child(first.id, "grandchild.py", "sequence")
+    frontier.freeze_result(
+        grandchild.id, primary=0.615, status="success", code_path="grandchild.py",
+        hypothesis="sequence", target_component="sequence", source_sha256="grandchild",
+        trial_config={"window": 20}, seed=42, metrics={"primary": 0.615},
+        stability={"primary_mean": 0.612, "primary_std": 0.001},
+    )
+    assert frontier.get_node(0).visits == 3
+    assert frontier.get_node(first.id).visits == 2
+    assert frontier.get_node(grandchild.id).visits == 1
+    assert frontier.best_node().id == grandchild.id
+    assert [node.id for node in frontier.lineage(grandchild.id)] == [0, first.id, grandchild.id]
+    try:
+        frontier.freeze_result(
+            grandchild.id, primary=0.9, status="success", code_path="changed.py",
+            hypothesis="mutated", target_component="loss", source_sha256="changed",
+            trial_config={}, seed=1, metrics={"primary": 0.9}, stability=None,
+        )
+        raise AssertionError("a frozen node must reject identity mutation")
+    except ValueError as exc:
+        assert "already frozen" in str(exc)
+
+
+def test_candidate_sandbox_blocks_filesystem_escape_and_network_imports():
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        trial = root / "trial"
+        data = root / "data"
+        baseline = root / "baseline"
+        trial.mkdir()
+        data.mkdir()
+        baseline.mkdir()
+        outside = root / "forbidden_probe"
+        (trial / "model.py").write_text(
+            f"open({str(outside)!r}, 'w').write('escaped')\n",
+            encoding="utf-8",
+        )
+        config = load_config()
+        config.DATA_DIR = data
+        config.BASELINE_ROOT = baseline
+        execution = execute_model(trial, config, timeout_seconds=10)
+        assert not execution.success
+        assert "candidate sandbox blocked path" in (execution.error or "")
+        assert not outside.exists()
+    violations = scan_candidate_source("import socket\nsocket.create_connection(('x', 80))")
+    assert any("socket" in violation for violation in violations)
 
 
 def main() -> None:

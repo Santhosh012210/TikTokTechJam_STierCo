@@ -35,11 +35,9 @@ from mle_agent.research_agent.experiment_history import (
     ExperimentRecord,
     append_record,
     classify_outcome,
-    compact_for_prompt,
     failed_fingerprints,
 )
 from mle_agent.research_agent.prior_evidence import (
-    compact_prior_experiment_evidence,
     snapshot_prior_experiment_evidence,
 )
 
@@ -67,6 +65,9 @@ class AgentIterationResult:
     # config. agent_main reads this to emit one evidence row per config while
     # still counting the sweep as a single convergence turn.
     sweep_members: list[dict] | None = None
+    # Exact scored execution chosen for this iteration. Its source snapshot and
+    # trial configuration, not the mutable working file, define candidate identity.
+    selected_execution: dict | None = None
 
 
 @dataclass
@@ -142,6 +143,7 @@ class ResearchAgent:
         blob_dir: Path | None = None,
         run_id: str | None = None,
         history_path: Path | None = None,
+        run_deadline: float | None = None,
     ) -> None:
         self.config = config
         self.client = client or make_client()
@@ -158,7 +160,12 @@ class ResearchAgent:
             starter_kit_root=config.BASELINE_ROOT,
             convergence_epsilon=f"{config.CONVERGENCE_EPSILON:.4f}",
         )
-        self._prompt_records: dict[str, RenderedPrompt] = {system_prompt.name: system_prompt}
+        prior_findings_prompt = render_prompt("prior_findings.md")
+        self._prompt_records: dict[str, RenderedPrompt] = {
+            system_prompt.name: system_prompt,
+            prior_findings_prompt.name: prior_findings_prompt,
+        }
+        self._prior_findings_prompt = prior_findings_prompt.content
         self.loop_state = AgentLoopState(
             phase="experiment" if (bootstrap_state and bootstrap_state.complete) else "bootstrap",
             messages=[{"role": "user", "content": system_prompt.content}],
@@ -175,7 +182,6 @@ class ResearchAgent:
         self._prior_experiment_evidence = snapshot_prior_experiment_evidence(
             config.RUN_RESEARCH_DIR
         )
-        self._prior_experiment_prompt = compact_prior_experiment_evidence()
         self._memory = PhaseAwareMemory(
             token_budget=config.AGENT_CONTEXT_TOKEN_BUDGET,
             experiment_tail_budget=config.AGENT_EXPERIMENT_TAIL_TOKEN_BUDGET,
@@ -196,6 +202,7 @@ class ResearchAgent:
         )
         self._bootstrap_digest = None
         self._run_id = run_id or "unknown_run"
+        self._run_deadline = run_deadline
         # Cross-run memory. Reading is always safe and always useful, so it is on
         # by default. Writing is opt-in: a caller must name the file. Anything
         # that constructs a ResearchAgent without meaning to contribute knowledge
@@ -203,7 +210,6 @@ class ResearchAgent:
         # otherwise silently append junk to the ledger the agent later trusts.
         self._history_path = history_path
         self._failed_fingerprints = failed_fingerprints()
-        self._history_prompt = compact_for_prompt()
 
     @property
     def prompt_evidence(self) -> list[dict[str, str]]:
@@ -425,8 +431,21 @@ class ResearchAgent:
         recovery_events: list[dict],
         phase: str,
     ) -> LLMResponse:
-        """Call the provider with exactly one retry after an exception."""
-        for attempt in range(2):
+        """Call the provider with one quick retry and bounded quota recovery."""
+        attempt = 0
+        quota_resumes = 0
+        while True:
+            if (
+                self._run_deadline is not None
+                and time.time() >= self._run_deadline - self.config.AGENT_WALL_RESERVE_S
+            ):
+                recovery_events.append({
+                    "type": "wall_budget",
+                    "phase": phase,
+                    "action": "wall_budget_exhausted",
+                    "outcome": "unresolved",
+                })
+                raise RuntimeError("WALL_BUDGET_EXHAUSTED before provider call")
             self._provider_call_attempts += 1
             provider_attempt = self._provider_call_attempts
             messages_before_call = len(self.messages)
@@ -436,7 +455,7 @@ class ResearchAgent:
                     self.messages, tools=tools, max_tokens=max_tokens
                 )
             except Exception as exc:
-                will_retry = attempt == 0 and not bool(
+                ordinary_retry = attempt == 0 and not bool(
                     getattr(exc, "non_retryable", False)
                 )
                 error_text = f"{type(exc).__name__}: {exc}"
@@ -448,13 +467,36 @@ class ResearchAgent:
                     self.rate_limit_retry_delay_s
                     if is_rate_limit else self.provider_retry_delay_s
                 )
+                remaining_wall = (
+                    float("inf") if self._run_deadline is None
+                    else self._run_deadline - time.time() - self.config.AGENT_WALL_RESERVE_S
+                )
+                quota_resume = (
+                    not ordinary_retry
+                    and is_rate_limit
+                    and self.config.AGENT_AUTO_RESUME_QUOTA
+                    and quota_resumes < self.config.AGENT_MAX_QUOTA_RESUMES
+                    and remaining_wall > 0
+                )
+                cost_limit = type(exc).__name__ == "CostLimitError"
+                action = (
+                    "retry_once" if ordinary_retry
+                    else "quota_pause" if quota_resume
+                    else "cost_limit_exhausted" if cost_limit
+                    else "quota_resume_limit_exhausted" if is_rate_limit
+                    else "retry_exhausted"
+                )
+                wait_seconds = (
+                    min(retry_delay, self.config.AGENT_MAX_QUOTA_WAIT_S, remaining_wall)
+                    if quota_resume else retry_delay if ordinary_retry else 0
+                )
                 recovery_events.append({
                     "type": "provider_error",
                     "phase": phase,
                     "attempt": attempt + 1,
                     "error": error_text,
-                    "action": "retry_once" if will_retry else "retry_exhausted",
-                    "retry_delay_seconds": retry_delay if will_retry else 0,
+                    "action": action,
+                    "retry_delay_seconds": max(0.0, wait_seconds),
                 })
                 self._emit_trace_event({
                     "event_type": "provider_error",
@@ -466,21 +508,36 @@ class ResearchAgent:
                     "latency_seconds": time.time() - call_started,
                     "messages_before_call": messages_before_call,
                     "error": redact_secrets(error_text),
-                    "will_retry": will_retry,
-                    "retry_delay_seconds": retry_delay if will_retry else 0,
+                    "will_retry": ordinary_retry or quota_resume,
+                    "retry_delay_seconds": max(0.0, wait_seconds),
                 })
+                if quota_resume:
+                    quota_resumes += 1
+                    self._emit_trace_event({
+                        "event_type": "quota_pause",
+                        "timestamp": self._now(),
+                        "provider": self._provider_label,
+                        "phase": phase,
+                        "quota_resume": quota_resumes,
+                        "retry_delay_seconds": max(0.0, wait_seconds),
+                    })
                 console.harness(
                     "Provider recovery",
                     phase=phase,
                     attempt=f"{attempt + 1}/2",
-                    action="Retrying once" if will_retry else "Retry exhausted",
-                    delay_seconds=retry_delay if will_retry else 0,
+                    action=(
+                        "Retrying once" if ordinary_retry
+                        else "Waiting for quota" if quota_resume
+                        else "Retry exhausted"
+                    ),
+                    delay_seconds=max(0.0, wait_seconds),
                     error=redact_secrets(error_text)[:500],
                 )
-                if not will_retry:
+                if not (ordinary_retry or quota_resume):
                     raise
-                if retry_delay > 0:
-                    time.sleep(retry_delay)
+                if wait_seconds > 0:
+                    time.sleep(wait_seconds)
+                attempt = attempt + 1 if ordinary_retry else 0
                 continue
 
             # Persist the successful response outside the provider-exception
@@ -501,7 +558,6 @@ class ResearchAgent:
                 getattr(self.client, "spent_usd", 0.0) or 0.0
             )
             return response
-        raise AssertionError("provider retry loop terminated unexpectedly")
 
     def _reflect(
         self,
@@ -775,6 +831,8 @@ class ResearchAgent:
             self.bootstrap_state,
             dependency_approver=self._approve_dependency_install,
             failed_fingerprints=self._failed_fingerprints,
+            run_deadline=self._run_deadline,
+            iteration=0,
         )
         total_input = 0
         total_output = 0
@@ -827,8 +885,7 @@ class ResearchAgent:
             "bootstrap.md",
             candidate_dir=candidate_dir,
             max_turns=max_turns,
-            prior_experiment_evidence=self._prior_experiment_prompt,
-            cross_run_history=self._history_prompt,
+            prior_findings=self._prior_findings_prompt,
             bootstrap_digest=digest_section,
             remaining_work=(
                 "The harness has completed discovery, the required reads, the EDA, the "
@@ -972,6 +1029,7 @@ class ResearchAgent:
         best_primary: float,
         max_turns: int,
         experiments_remaining: int | None = None,
+        required_target_component: str | None = None,
     ) -> AgentIterationResult:
         started = time.time()
         self.loop_state.phase = "experiment"
@@ -1002,6 +1060,10 @@ class ResearchAgent:
             self.bootstrap_state,
             dependency_approver=self._approve_dependency_install,
             failed_fingerprints=self._failed_fingerprints,
+            run_deadline=self._run_deadline,
+            iteration=iteration,
+            experiments_remaining=experiments_remaining,
+            required_target_component=required_target_component,
         )
         total_input = 0
         total_output = 0
@@ -1034,11 +1096,15 @@ class ResearchAgent:
             research_plan=json.dumps(
                 self.bootstrap_state.research_backlog or [], ensure_ascii=False
             ),
-            prior_experiment_evidence=self._prior_experiment_prompt,
-            cross_run_history=self._history_prompt,
+            prior_findings=self._prior_findings_prompt,
             stage_instruction=(
                 "Use the retained task context, reproduced baseline result, literature evidence, "
                 "and full prior conversation to choose the next change."
+                + (
+                    " This is a planned breadth branch from the baseline; target "
+                    f"`{required_target_component}` and pass that exact target_component."
+                    if required_target_component else ""
+                )
             ),
         )
         self._prompt_records[iteration_prompt.name] = iteration_prompt
@@ -1196,9 +1262,13 @@ class ResearchAgent:
             break
 
         self._bootstrapped = self.bootstrap_state.complete
-        best_execution = next(
-            (execution for execution in reversed(runtime.executions) if execution["success"]),
-            None,
+        successful_executions = [
+            execution for execution in runtime.executions if execution["success"]
+        ]
+        best_execution = max(
+            successful_executions,
+            key=lambda execution: float(execution["metrics"]["primary"]),
+            default=None,
         )
         last_execution = runtime.executions[-1] if runtime.executions else None
         chosen = best_execution or last_execution
@@ -1250,7 +1320,15 @@ class ResearchAgent:
                 self.loop_state.phase = "experiment"
 
         model_path = candidate_dir / "model.py"
-        final_code = model_path.read_text(encoding="utf-8") if model_path.exists() else None
+        snapshot_path = (
+            Path(str(best_execution.get("source_snapshot_path")))
+            if best_execution and best_execution.get("source_snapshot_path") else None
+        )
+        final_code = (
+            snapshot_path.read_text(encoding="utf-8")
+            if snapshot_path is not None and snapshot_path.is_file()
+            else model_path.read_text(encoding="utf-8") if model_path.exists() else None
+        )
         hypothesis_supported: bool | None = None
         hypothesis_status = ""
         implementation_diagnosis = ""
@@ -1327,4 +1405,5 @@ class ResearchAgent:
             implementation_diagnosis=implementation_diagnosis,
             suggested_next=suggested_next,
             sweep_members=sweep_members,
+            selected_execution=best_execution,
         )

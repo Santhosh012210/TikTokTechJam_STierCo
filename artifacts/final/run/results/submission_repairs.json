@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "repairs": [
+    {
+      "id": 10,
+      "repair_parent_id": 7,
+      "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_010/model.py",
+      "hypothesis": "Apply node 007's frozen train-hour vocabulary and field order to submission features.",
+      "primary": 0.6040974113008648,
+      "status": "success",
+      "target_component": "submission_contract",
+      "source_sha256": "ead5e0a3eca011c5fe2ecc18cb75e3271b2b0bd606f53bcb57ad735af287a152",
+      "trial_config": {
+        "embed_dim": 16,
+        "cross_layers": 2,
+        "hidden": 96,
+        "lr": 0.001,
+        "weight_decay": 1e-06,
+        "epochs": 20,
+        "batch_size": 4096,
+        "patience": 4
+      },
+      "seed": 0,
+      "metrics": {
+        "GAUC": 0.6706213118939652,
+        "nDCG@5": 0.5375735107077644,
+        "primary": 0.6040974113008648,
+        "users": 22377.0,
+        "rows": 124909.0
+      },
+      "stability": {
+        "seeds": [0, 1, 2, 3, 4],
+        "primary_mean": 0.6042930791631571,
+        "primary_std": 0.00019834089458614374,
+        "successful_seed_count": 5,
+        "per_seed": {
+          "0": {"GAUC": 0.6706213118939652, "nDCG@5": 0.5375735107077644, "primary": 0.6040974113008648, "users": 22377.0, "rows": 124909.0},
+          "1": {"GAUC": 0.6711369178331283, "nDCG@5": 0.5380324400488702, "primary": 0.6045846789409992, "users": 22377.0, "rows": 124909.0},
+          "2": {"GAUC": 0.6706424766407896, "nDCG@5": 0.5378958368041941, "primary": 0.6042691567224918, "users": 22377.0, "rows": 124909.0},
+          "3": {"GAUC": 0.6705988855073793, "nDCG@5": 0.5375405254512492, "primary": 0.6040697054793143, "users": 22377.0, "rows": 124909.0},
+          "4": {"GAUC": 0.6711441268554139, "nDCG@5": 0.5377447598888173, "primary": 0.6044444433721157, "users": 22377.0, "rows": 124909.0}
+        }
+      },
+      "conservative_primary": 0.604094738268571,
+      "frozen": true,
+      "submission_ready_verified": true
+    }
+  ]
+}

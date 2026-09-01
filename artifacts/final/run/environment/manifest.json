@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-01T01:28:33.670392Z",
+  "environment_dir": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/.venv",
+  "python_executable": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/.venv/bin/python",
+  "base_python_executable": "/Users/sabithajayakumar/TikTokTechJam_STierCo/.venv/bin/python",
+  "base_package_paths": [
+    "/Users/sabithajayakumar/TikTokTechJam_STierCo/.venv/lib/python3.13/site-packages"
+  ],
+  "install_isolation": "all pip writes target the dedicated per-run venv",
+  "auto_install_allowlist": [
+    "catboost",
+    "imbalanced-learn",
+    "lightgbm",
+    "numpy",
+    "optuna",
+    "pandas",
+    "polars",
+    "pyarrow",
+    "recbole",
+    "scikit-learn",
+    "scipy",
+    "statsmodels",
+    "torch",
+    "torchaudio",
+    "torchrec",
+    "torchvision",
+    "transformers",
+    "xgboost"
+  ],
+  "binary_only_installs": true,
+  "pip_isolated_mode": true,
+  "snapshots": [
+    {
+      "phase": "created",
+      "timestamp": "2026-09-01T01:28:33.825411Z",
+      "requirements_lock": "/Users/sabithajayakumar/TikTokTechJam_STierCo/artifacts/runs/20260901_012832/environment/requirements.lock.txt",
+      "requirements_lock_sha256": "1700ed43492685cd888daa077612302db2177aecd216c31be9cc1930862507eb",
+      "resolved_distribution_count": 105
+    },
+    {
+      "phase": "run_complete",
+      "timestamp": "2026-09-01T01:49:28.703036Z",
+      "requirements_lock": "/Users/sabithajayakumar/TikTokTechJam_STierCo/artifacts/runs/20260901_012832/environment/requirements.lock.txt",
+      "requirements_lock_sha256": "1700ed43492685cd888daa077612302db2177aecd216c31be9cc1930862507eb",
+      "resolved_distribution_count": 105
+    }
+  ]
+}

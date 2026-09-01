@@ -1,0 +1,107 @@
+{
+  "success": true,
+  "python_executable": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/.venv/bin/python",
+  "python_version": "3.13.13",
+  "platform": "macOS-26.6.2-arm64-i386-64bit-Mach-O",
+  "packages": {
+    "catboost": {
+      "installed": false,
+      "version": null
+    },
+    "imbalanced-learn": {
+      "installed": false,
+      "version": null
+    },
+    "lightgbm": {
+      "installed": false,
+      "version": null
+    },
+    "numpy": {
+      "installed": true,
+      "version": "2.5.2"
+    },
+    "optuna": {
+      "installed": false,
+      "version": null
+    },
+    "pandas": {
+      "installed": true,
+      "version": "3.0.5"
+    },
+    "polars": {
+      "installed": false,
+      "version": null
+    },
+    "pyarrow": {
+      "installed": false,
+      "version": null
+    },
+    "recbole": {
+      "installed": false,
+      "version": null
+    },
+    "scikit-learn": {
+      "installed": true,
+      "version": "1.9.0"
+    },
+    "scipy": {
+      "installed": true,
+      "version": "1.18.1"
+    },
+    "statsmodels": {
+      "installed": false,
+      "version": null
+    },
+    "torch": {
+      "installed": true,
+      "version": "2.13.0"
+    },
+    "torchaudio": {
+      "installed": false,
+      "version": null
+    },
+    "torchvision": {
+      "installed": false,
+      "version": null
+    },
+    "torchrec": {
+      "installed": false,
+      "version": null
+    },
+    "transformers": {
+      "installed": false,
+      "version": null
+    },
+    "xgboost": {
+      "installed": false,
+      "version": null
+    },
+    "tensorflow": {
+      "installed": false,
+      "version": null
+    }
+  },
+  "policy": "The hackathon permits open-source frameworks. Missing allowlisted ML packages auto-install as binary wheels in this run's dedicated venv; off-allowlist packages require explicit approval. Every resolution is logged and frozen.",
+  "environment_dir": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/.venv",
+  "auto_install_allowlist": [
+    "catboost",
+    "imbalanced-learn",
+    "lightgbm",
+    "numpy",
+    "optuna",
+    "pandas",
+    "polars",
+    "pyarrow",
+    "recbole",
+    "scikit-learn",
+    "scipy",
+    "statsmodels",
+    "torch",
+    "torchaudio",
+    "torchrec",
+    "torchvision",
+    "transformers",
+    "xgboost"
+  ],
+  "binary_only_installs": true
+}

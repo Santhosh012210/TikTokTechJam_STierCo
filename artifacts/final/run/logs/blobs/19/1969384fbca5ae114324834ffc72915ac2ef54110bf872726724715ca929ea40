@@ -1,0 +1,46 @@
+{
+  "query": "censored watch time recommendation duration normalized play progress multi task auxiliary ranking",
+  "results": [
+    {
+      "chunk_id": "censored-regression#what-it-is",
+      "method": "censored-regression",
+      "title": "Censored regression for watch time",
+      "section": "What it is",
+      "score": 18.637,
+      "text": "Watch time on a short video is a *censored* observation. If a user watches a 15-second\nvideo for all 15 seconds, the recorded watch time is 15 — but the quantity of interest is\nhow long they *would* have watched, which is at least 15 and possibly much more. The\nvideo ended; the interest did not.\n\nSquared error treats that 15 as an exact target and penalises the model for predicting\n20, which is wrong: 20 is entirely consistent with the observation. Censored regression\nuses a one-sided loss instead — for a completed play, the model is penalised only for\npredicting *below* the observed duration:\n\n    if play was completed (watch_time >= duration):\n        loss = max(0, duration - prediction) ** 2       # penalise under-prediction only\n    else:\n        loss = (watch_time - prediction) ** 2           # exact observation, normal loss\n\nThe KDD 2024 formulation goes further, defining counterfactual watch time — the time a\nuser would spend if duration were unbounded — and learning it by maximising a\ncounterfactual likelihood over observed watch times, with a cost-based transform mapping\nthat quantity to user interest."
+    },
+    {
+      "chunk_id": "censored-regression#how-to-implement",
+      "method": "censored-regression",
+      "title": "Censored regression for watch time",
+      "section": "How to implement",
+      "score": 16.6442,
+      "text": "Diagnose before implementing. The check is cheap and decides whether this is worth doing:\n\n1. Bucket impressions by video duration.\n2. Compute the positive rate of the scored label per bucket.\n3. Plot or tabulate. A strong monotone relationship between duration and label rate is\n   duration bias, and confirms the premise.\n\nIf the relationship is strong, the simplest interventions in increasing order of cost:\n\n**Duration-debiased label.** Instead of the raw label, use the label residualised against\nduration — the difference between this row's completion and the average completion for\nits duration bucket. Rank on that.\n\n**Watch-time-percentile target.** Convert watch time into its percentile *within the\nvideo's duration bucket*, which removes the duration scale entirely. Train a regression\nagainst the percentile and use it as an auxiliary task alongside the main label.\n\n**One-sided loss.** As written above, requires the completion indicator. In numpy the\ngradient is a masked linear term:\n\n    residual = prediction - target\n    completed_and_over = completed & (residual > 0)\n    grad = 2 * residual\n    grad[completed_and_over] = 0.0      # no penalty for over-predicting a completed play\n\nNote the model must still be *scored* on the original label — the debiasing changes what\nis trained on, never what is evaluated."
+    },
+    {
+      "chunk_id": "censored-regression#why-it-helps-a-ranking-metric",
+      "method": "censored-regression",
+      "title": "Censored regression for watch time",
+      "section": "Why it helps a ranking metric",
+      "score": 14.1423,
+      "text": "Duration bias is the concrete problem: because short videos are completed far more often\nthan long ones, raw watch time and completion rate both correlate strongly with video\nduration rather than with user interest. A model trained naively on watch time learns to\nrank short videos highly, which is a duration artefact, not a preference.\n\nIf the scored label is itself derived from watch time (a \"long view\" or completion flag,\nfor instance), the label inherits this bias, and correcting for it targets the actual\nscoring objective rather than a proxy.\n\nThe correction varies *within* a user's impression list because duration varies within it,\nso it is capable of reordering — unlike a user-level correction, which would cancel."
+    },
+    {
+      "chunk_id": "censored-regression#when-it-will-not-help",
+      "method": "censored-regression",
+      "title": "Censored regression for watch time",
+      "section": "When it will not help",
+      "score": 10.6216,
+      "text": "- If the duration-vs-label-rate check comes back flat, there is no duration bias in this\n  data and the whole premise is absent. Run the check first.\n- If watch-time and duration columns are not both present, none of this is computable.\n- The full counterfactual formulation is a research-grade method whose reference\n  implementation targets a different reconstructed label and pins an old framework\n  version. Treat the paper as the idea source and implement the one-sided loss directly\n  rather than trying to run the original code."
+    },
+    {
+      "chunk_id": "weighted-logistic-regression#how-to-implement",
+      "method": "weighted-logistic-regression",
+      "title": "Weighted logistic regression for watch time",
+      "section": "How to implement",
+      "score": 10.5011,
+      "text": "Two lines on top of any logistic model — multiply the per-example loss and gradient by a\nweight:\n\n    w = np.where(y == 1, watch_time, 1.0)\n    grad = w[:, None] * base_gradient\n\nClip or log-transform the weights. A single 10-minute view among 30-second videos\nproduces a weight 20x the typical positive and will dominate a batch. `w = log1p(watch_time)`\nor clipping at a high percentile both work; the choice is worth an ablation.\n\nWatch for interaction with duration bias — weighting by raw watch time makes long videos\nmore influential, which is the opposite of the correction censored regression applies.\nThe two methods pull in different directions, so combining them naively is not sound.\nDecide which framing the data supports before layering both."
+    }
+  ],
+  "bootstrap_counted": true
+}

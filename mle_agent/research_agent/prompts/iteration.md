@@ -20,23 +20,14 @@ evidence):
 ${research_plan}
 ```
 
-Experiments already measured in earlier runs of this agent. The harness refuses an
-identical candidate outright; re-testing the same idea with a different implementation
-is allowed only if you state what the earlier attempt got wrong:
+Reviewed research knowledge from earlier runs. Follow its scoped `do not retry` rules;
+the harness separately refuses identical candidate fingerprints:
 
-```json
-${cross_run_history}
-```
+${prior_findings}
 
-Verified development-run frontier available to this run:
-
-```json
-${prior_experiment_evidence}
-```
-
-Use it as prior evidence, not as an official incumbent. Do not repeat its exact experiment sequence
-or repeat the old report's incorrect BPR attribution; reproduce or extend it through an attributable
-change and fresh trusted scoring.
+Use these findings as supplied knowledge, not as an official incumbent. Do not repeat an
+exact experiment merely to rediscover its score; isolate or extend a mechanism through an
+attributable change and fresh trusted scoring.
 
 Experiments 1-3 must each target a distinct `target_component`. The harness refuses a repeat before
 three distinct components have been scored unless you pass `diversity_override` with a written,
@@ -87,7 +78,10 @@ the raw CSVs. Keep every scored feature pipeline self-contained in `model.py`. D
 organizer's measured all-13-static-field ablation. Prefer within-user-varying item/context signals,
 train-history sequences or aggregates, temporal signals, and meaningful user-item crosses. Fit all
 vocabularies, buckets, aggregates, and any label-derived statistics on training rows only, then apply
-the frozen transform to validation. For these experiments, pass `feature_sources`,
+the frozen transform to validation. Implement the identical frozen transform and field order for the
+`--submission-path` inference branch as part of the same edit, even though research cannot execute
+that branch. A candidate that augments train/validation but sends raw submission encoding to the
+model violates the candidate contract. For these experiments, pass `feature_sources`,
 `feature_transformations`, and `leakage_controls` to `run_model`.
 
 Measure validation accuracy and runtime/complexity tradeoffs. Do not end the experiment until you

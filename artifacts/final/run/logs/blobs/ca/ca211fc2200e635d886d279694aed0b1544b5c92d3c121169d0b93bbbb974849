@@ -1,0 +1,55 @@
+{
+  "starter_kit_root": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit",
+  "primary_readme_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/README.md",
+  "required_support_paths": [
+    "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py",
+    "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/evaluate.py",
+    "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/data.py",
+    "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/ablation_features.py"
+  ],
+  "documents": [
+    {
+      "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/README.md",
+      "relative_path": "README.md",
+      "kind": "task_readme",
+      "chars": 9289,
+      "lines": 191
+    },
+    {
+      "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py",
+      "relative_path": "baseline.py",
+      "kind": "benchmark_support",
+      "chars": 5425,
+      "lines": 118
+    },
+    {
+      "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/evaluate.py",
+      "relative_path": "evaluate.py",
+      "kind": "benchmark_support",
+      "chars": 2615,
+      "lines": 62
+    },
+    {
+      "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/data.py",
+      "relative_path": "data.py",
+      "kind": "benchmark_support",
+      "chars": 2666,
+      "lines": 64
+    },
+    {
+      "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/ablation_features.py",
+      "relative_path": "ablation_features.py",
+      "kind": "benchmark_support",
+      "chars": 3791,
+      "lines": 78
+    },
+    {
+      "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline_scores.json",
+      "relative_path": "baseline_scores.json",
+      "kind": "benchmark_support",
+      "chars": 2349,
+      "lines": 98
+    }
+  ],
+  "instruction": "Read the primary README, official baseline, evaluation code, data.py, feature ablation, and inherited model.py until every response is complete."
+}

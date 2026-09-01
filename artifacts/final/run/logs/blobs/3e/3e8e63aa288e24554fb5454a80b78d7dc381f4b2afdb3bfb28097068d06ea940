@@ -1,0 +1,80 @@
+{
+  "hypothesis": "A seeded DCN-V2 with two explicit matrix cross layers and a small deep tower over the unchanged five organizer fields will improve within-user long-view ranking over pairwise FM by learning bounded higher-order user-item-author-tab-duration interactions.",
+  "reasoning": "The preceding attempt trained successfully but failed after prediction generation solely because json.dumps cannot serialize a NumPy float32. The repair converts only the status-print scalar to float; data, training, checkpointing, and scoring logic are unchanged. DCN-V2 remains a representation test supported by dcn#what-it-is and dcn#why-it-helps-a-ranking-metric.",
+  "literature_chunk_ids": [
+    "dcn#what-it-is",
+    "dcn#why-it-helps-a-ranking-metric",
+    "dcn#when-it-will-not-help"
+  ],
+  "proposal": {
+    "target_component": "model",
+    "expected_effect": "Expected +0.003 primary versus 0.601469 if the explicit higher-order crosses contribute ranking signal.",
+    "falsification_criterion": "A successfully emitted, aligned prediction file from stable DCN-V2 training fails to improve primary by at least 0.0020 over 0.601469.",
+    "rollback_plan": "Retain the pointwise five-field FM incumbent and treat this five-field DCN-V2 bundle as unsupported if it fails.",
+    "feature_sources": [
+      "The inherited encoded five fields: user_id, video_id, author_id, tab, dur_bucket."
+    ],
+    "feature_transformations": [
+      "No new candidate-data feature transforms; DCN-V2 replaces FM pairwise interaction with two explicit matrix cross layers plus a 96→48 ReLU tower."
+    ],
+    "leakage_controls": [
+      "Organizer data.encode() fits categorical vocabularies and duration bucket edges on train only and provides unknown IDs for validation.",
+      "Only training labels enter BCE optimization; validation labels are used solely for fixed official early stopping/evaluation.",
+      "No test split, validation-derived feature, or external data is accessed."
+    ]
+  },
+  "success": true,
+  "metrics": {
+    "GAUC": 0.6705164336994126,
+    "nDCG@5": 0.5372551905930373,
+    "primary": 0.6038858121462249,
+    "users": 22377.0,
+    "rows": 124909.0
+  },
+  "error": null,
+  "wall_seconds": 12.269553184509277,
+  "candidate_changed": true,
+  "candidate_fingerprint": "c49a0b58ff555429283e36365db25a7b6424faf45f214125cb8901ca34ad4410",
+  "seed": 0,
+  "trial_config": {
+    "embed_dim": 16,
+    "cross_layers": 2,
+    "hidden": 96,
+    "lr": 0.001,
+    "weight_decay": 1e-06,
+    "epochs": 20,
+    "batch_size": 4096,
+    "patience": 4
+  },
+  "sanity_check": null,
+  "change_summary": {
+    "hunks": 21,
+    "lines_added": 70,
+    "lines_removed": 109,
+    "parent_lines": 146,
+    "is_rewrite": true,
+    "attribution_warning": "This experiment replaced 109 of 146 inherited lines. A wholesale rewrite bundles every change together, so a score move cannot be attributed to any one of them. Prefer edit_file for a targeted change; if a full replacement is genuinely required (a different model family, say), say so in the reflection and treat the result as evidence about the bundle rather than about one idea."
+  },
+  "prediction_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_003/.harness/validation_predictions_9bcf10745f254b65b47be3f8510e83d2_seed_0.csv",
+  "prediction_sha256": "f823c5b30da7ef3e9ba8e4ff564aa3b8fbfaa252c97a5952962dff4864499b31",
+  "execution_id": "9bcf10745f254b65b47be3f8510e83d2",
+  "source_sha256": "bc672f3fadd4cfe8b2848ebb2d15abb2ff627a9737c226a922e3fff41913c433",
+  "source_snapshot_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_003/.harness/executions/9bcf10745f254b65b47be3f8510e83d2/model.py",
+  "resource_usage": {
+    "cpu_user_seconds": 11.53846999999999,
+    "cpu_system_seconds": 0.6076730000000001,
+    "peak_rss_platform_units": 980631552,
+    "timeout_seconds": 1800,
+    "accelerator": "not_measured"
+  },
+  "execution_class": "substantial",
+  "execution_grant": {
+    "granted": true,
+    "requested_class": "substantial",
+    "granted_class": "substantial",
+    "timeout_seconds": 1800,
+    "remaining_wall_seconds": 20864.1,
+    "reason": "requested class 'substantial' granted at 1800s"
+  },
+  "execution_attempted": true
+}

@@ -1,0 +1,30 @@
+{
+  "query": "ranking loss BPR listwise softmax recommendation",
+  "results": [
+    {
+      "chunk_id": "listwise-softmax#why-it-helps-a-ranking-metric",
+      "method": "listwise-softmax",
+      "title": "Listwise softmax over a user's impressions",
+      "section": "Why it helps a ranking metric",
+      "score": 11.3602,
+      "text": "nDCG@5 is a position-sensitive metric: it cares most about the very top of each user's\nlist. Pairwise loss treats all inversions equally — swapping ranks 1 and 2 costs the\nsame as swapping 40 and 41. Softmax loss weights gradients by `p_i`, which concentrates\non the items the model currently ranks highly, so its gradient pressure is naturally\nbiased towards the top of the list where nDCG@5 is decided.\n\nLike BPR, it is shift-invariant within a user: adding a constant to every score in a\nlist leaves the softmax unchanged, so user-constant terms contribute no gradient."
+    },
+    {
+      "chunk_id": "listwise-softmax#when-it-will-not-help",
+      "method": "listwise-softmax",
+      "title": "Listwise softmax over a user's impressions",
+      "section": "When it will not help",
+      "score": 10.1207,
+      "text": "- If lists are truncated or split across batches, the normalisation is wrong and results\n  will be erratic. Batch by user.\n- Users with very long impression lists dominate the loss unless you normalise per user.\n  The `y_normalised` division above handles the positive count; consider also whether\n  users with 500 impressions should outweigh users with 5.\n- Sensitive to a temperature/scale parameter in a way BPR is not. If scores are large,\n  the softmax saturates and gradients vanish. Consider dividing scores by a learned or\n  fixed temperature."
+    },
+    {
+      "chunk_id": "listwise-softmax#what-it-is",
+      "method": "listwise-softmax",
+      "title": "Listwise softmax over a user's impressions",
+      "section": "What it is",
+      "score": 8.7067,
+      "text": "Treat one user's impression list as a single training example. Score every item in the\nlist, take a softmax over those scores, and maximise the log-probability mass on the\npositive items:\n\n    p = softmax(s_1 ... s_n)          # over one user's n impressions\n    L = -sum over positives of log(p_i)\n\nWhere pairwise loss looks at two items at a time, listwise looks at the whole list at\nonce, so a positive is pushed above *all* negatives in the list simultaneously rather\nthan one sampled negative at a time."
+    }
+  ],
+  "bootstrap_counted": true
+}

@@ -58,7 +58,10 @@ def scan_candidate_source(source: str) -> list[str]:
                 else [node.module or ""]
             )
             for module in imported:
-                if module.split(".", 1)[0] in {"ensurepip", "pip", "subprocess"}:
+                if module.split(".", 1)[0] in {
+                    "aiohttp", "ctypes", "ensurepip", "ftplib", "httpx", "pip",
+                    "requests", "socket", "subprocess", "urllib",
+                }:
                     message = f"candidate process-launch/package-manager import: {module}"
                     if message not in violations:
                         violations.append(message)
@@ -105,7 +108,10 @@ def scan_candidate_source(source: str) -> list[str]:
                     value
                     and isinstance(node.func, ast.Name)
                     and node.func.id == "__import__"
-                    and value.split(".", 1)[0] in {"ensurepip", "pip", "subprocess"}
+                    and value.split(".", 1)[0] in {
+                        "aiohttp", "ctypes", "ensurepip", "ftplib", "httpx", "pip",
+                        "requests", "socket", "subprocess", "urllib",
+                    }
                 ):
                     message = f"dynamic candidate package/process import: {value}"
                     if message not in violations:

@@ -1,0 +1,192 @@
+{
+  "source_run_id": "20260901_012832",
+  "run_evidence_dir": "/Users/sabithajayakumar/TikTokTechJam_STierCo/artifacts/final/run",
+  "source_trial": 10,
+  "source_node_id": 10,
+  "research_best_node_id": 7,
+  "submission_repair_parent_node_id": 7,
+  "source_model_sha256": "ead5e0a3eca011c5fe2ecc18cb75e3271b2b0bd606f53bcb57ad735af287a152",
+  "source_trial_config": {
+    "embed_dim": 16,
+    "cross_layers": 2,
+    "hidden": 96,
+    "lr": 0.001,
+    "weight_decay": 1e-06,
+    "epochs": 20,
+    "batch_size": 4096,
+    "patience": 4
+  },
+  "source_seed": 0,
+  "submission_sha256": "052b57a6c11245c9ebf144fc2c500720e28a99c1cab90ec5af4c5bee660dbff5",
+  "task_definition_confirmed": true,
+  "stop_reason": "converged",
+  "converged": true,
+  "baseline_valid_metrics": {
+    "GAUC": 0.6674,
+    "nDCG@5": 0.5357,
+    "primary": 0.6016
+  },
+  "official_baseline_reference": {
+    "baseline_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py",
+    "baseline_sha256": "34d7bfc4b545a38a52dabf3084791e7c7dd6b911eca0e713fb707a6379156d27",
+    "scores_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline_scores.json",
+    "scores_sha256": "9a0c3575b31684dc8ef4d0762068796ff544b225f42d9bcaf8d53573082df1a5",
+    "config": {
+      "model": "FM",
+      "k": 16,
+      "lr": 0.001,
+      "batch": 8192,
+      "max_epochs": 40,
+      "patience": 4,
+      "fields": [
+        "user_id",
+        "video_id",
+        "author_id",
+        "tab",
+        "dur_bucket"
+      ]
+    },
+    "published_valid": {
+      "GAUC": 0.6674,
+      "nDCG@5": 0.5357,
+      "primary": 0.6016
+    },
+    "published_hidden_test": {
+      "GAUC": 0.661,
+      "nDCG@5": 0.5282,
+      "primary": 0.5946
+    },
+    "published_hidden_test_std_over_5_seeds": {
+      "test_GAUC": 0.0008,
+      "test_nDCG@5": 0.0008,
+      "test_primary": 0.0008
+    },
+    "comparison_split": "validation",
+    "hidden_test_was_not_scored": true
+  },
+  "official_hidden_test_baseline_metrics": {
+    "GAUC": 0.661,
+    "nDCG@5": 0.5282,
+    "primary": 0.5946
+  },
+  "best_valid_metrics": {
+    "GAUC": 0.6706213118939652,
+    "nDCG@5": 0.5375735107077644,
+    "primary": 0.6040974113008648,
+    "users": 22377.0,
+    "rows": 124909.0
+  },
+  "best_trial_stability": {
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "primary_mean": 0.6042930791631571,
+    "primary_std": 0.00019834089458614374,
+    "successful_seed_count": 5,
+    "per_seed": {
+      "0": {
+        "GAUC": 0.6706213118939652,
+        "nDCG@5": 0.5375735107077644,
+        "primary": 0.6040974113008648,
+        "users": 22377.0,
+        "rows": 124909.0
+      },
+      "1": {
+        "GAUC": 0.6711369178331283,
+        "nDCG@5": 0.5380324400488702,
+        "primary": 0.6045846789409992,
+        "users": 22377.0,
+        "rows": 124909.0
+      },
+      "2": {
+        "GAUC": 0.6706424766407896,
+        "nDCG@5": 0.5378958368041941,
+        "primary": 0.6042691567224918,
+        "users": 22377.0,
+        "rows": 124909.0
+      },
+      "3": {
+        "GAUC": 0.6705988855073793,
+        "nDCG@5": 0.5375405254512492,
+        "primary": 0.6040697054793143,
+        "users": 22377.0,
+        "rows": 124909.0
+      },
+      "4": {
+        "GAUC": 0.6711441268554139,
+        "nDCG@5": 0.5377447598888173,
+        "primary": 0.6044444433721157,
+        "users": 22377.0,
+        "rows": 124909.0
+      }
+    }
+  },
+  "stability_seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "metric_deltas_vs_baseline": {
+    "GAUC": 0.0032213118939652396,
+    "nDCG@5": 0.0018735107077644253,
+    "primary": 0.0024974113008647825
+  },
+  "tokens": {
+    "input": 2836062,
+    "output": 29604
+  },
+  "gpu_hours": 0.0,
+  "total_wall_seconds": 1256.069350719452,
+  "manual_interventions": 0,
+  "python_environment": {
+    "success": true,
+    "environment_manifest": "/Users/sabithajayakumar/TikTokTechJam_STierCo/artifacts/runs/20260901_012832/environment/manifest.json",
+    "phase": "run_complete",
+    "timestamp": "2026-09-01T01:49:28.703036Z",
+    "requirements_lock": "/Users/sabithajayakumar/TikTokTechJam_STierCo/artifacts/runs/20260901_012832/environment/requirements.lock.txt",
+    "requirements_lock_sha256": "1700ed43492685cd888daa077612302db2177aecd216c31be9cc1930862507eb",
+    "resolved_distribution_count": 105,
+    "python_executable": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/.venv/bin/python",
+    "environment_dir": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/.venv"
+  },
+  "requirements_lock": "/Users/sabithajayakumar/TikTokTechJam_STierCo/artifacts/final/requirements.lock.txt",
+  "prompt_templates": [
+    {
+      "name": "agent.md",
+      "path": "mle_agent/research_agent/prompts/agent.md",
+      "template_sha256": "336416d0893654423ec83467d163fe413434024cb540b937f696072626b41bfc"
+    },
+    {
+      "name": "prior_findings.md",
+      "path": "mle_agent/research_agent/prompts/prior_findings.md",
+      "template_sha256": "b09d2cb37527a529e902535805597b5b32b67781ea2415a8f437b49f17d14e30"
+    },
+    {
+      "name": "bootstrap.md",
+      "path": "mle_agent/research_agent/prompts/bootstrap.md",
+      "template_sha256": "994732e4cf1086b08e8fba50d654f5ff9a091c8f4b0bf7a5b1332d1ef6eaa5e2"
+    },
+    {
+      "name": "iteration.md",
+      "path": "mle_agent/research_agent/prompts/iteration.md",
+      "template_sha256": "dff84242b4769a34a2196a3a74462720a019e7dca4687a014e8f4725d1a1c964"
+    }
+  ],
+  "submission_validation": "✓ format and alignment validated: 170,588 rows, split=test",
+  "frozen_candidate_revalidation": "{\"status\": \"predictions_written\", \"rows\": 124909, \"best_primary\": 0.6040980815887451}\n",
+  "candidate_output_tail": "",
+  "finalization_candidate_attempts": [
+    {
+      "node_id": 10,
+      "status": "selected",
+      "conservative_primary": 0.604094738268571
+    }
+  ],
+  "hidden_test_comparison_status": "unmeasured; submission alignment was checked without scoring hidden labels"
+}

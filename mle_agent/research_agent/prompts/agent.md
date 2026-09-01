@@ -105,7 +105,11 @@ Accept exactly these arguments, all of which the inherited `model.py` already pa
   several configurations of one idea without rewriting the file each time.
 - `--submission-path` belongs to finalization only. Keep the `write_hidden_submission` function
   and its call, but never trigger it during research: the harness does not pass the flag and the
-  research data view contains no hidden rows.
+  research data view contains no hidden rows. Nevertheless, every feature transformation added to
+  training and validation must also have an inference-only branch for the submission rows. Reuse
+  the vocabulary, buckets, aggregates, and feature order fitted on training; never pass raw encoded
+  submission tensors into a model trained on augmented tensors. The inference branch may read only
+  feature columns and must never fit on or inspect submission labels.
 
 Both helpers are defined inside `model.py` itself and depend only on the standard library. Keep
 them there. Candidate code cannot import anything from `mle_agent`; only the organiser starter kit

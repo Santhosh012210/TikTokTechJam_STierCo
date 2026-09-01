@@ -1,0 +1,80 @@
+{
+  "hypothesis": "Appending a train-vocabulary hour-of-day context field to the five-field DCN-V2 will improve within-user long-view ranking because hour varies across a user's candidates and enables user/item/tab/duration context crosses that can adapt to the documented temporal label shift.",
+  "reasoning": "Validation long_view rate shifts from 0.3366 to 0.3133 and the README identifies time features/distribution shift as unexplored. The previously negative OOF item-rate experiment does not test time context, and a pure user-side feature cannot change within-user rank; hour is candidate-varying and DCN can cross it with user and item features (within-user-ranking#why-it-helps-a-ranking-metric). This directly tests the temporal-context backlog family while retaining the supported DCN-V2 architecture.",
+  "literature_chunk_ids": [
+    "within-user-ranking#why-it-helps-a-ranking-metric"
+  ],
+  "proposal": {
+    "target_component": "features",
+    "expected_effect": "Expected +0.0025 primary over 0.603886 if hour-specific user/item/context interactions capture stable behavioral timing patterns under the train-validation shift.",
+    "falsification_criterion": "This valid frozen hour-vocabulary DCN fails to improve primary by at least 0.0020 over 0.603886, or both GAUC and nDCG@5 decline.",
+    "rollback_plan": "Retain the five-field DCN-V2 incumbent; do not reuse this standalone raw-hour encoding. Consider a distinct watch-progress auxiliary target or train-only temporal reliability aggregate next.",
+    "feature_sources": [
+      "Immutable training and validation interaction-log hourmin columns, read from their respective official date-filtered files solely to align with data.load() order.",
+      "Inherited encoded fields user_id, video_id, author_id, tab, dur_bucket."
+    ],
+    "feature_transformations": [
+      "Parse hourmin to integer hour 0–23; fit the categorical hour vocabulary only on training log rows.",
+      "Append one offset hour-ID field to Xtr/Xva; DCN-V2 learns interactions with the inherited five fields.",
+      "No labels, rates, date identifiers, or static CWM fields are added."
+    ],
+    "leakage_controls": [
+      "Hour vocabulary is fit only on 20220408–20220421 training rows and validation hours map through its frozen vocabulary with an explicit UNK slot.",
+      "Hour values are impression context available without outcomes; no validation labels or auxiliary outcomes are read or aggregated.",
+      "Strict row-count assertions ensure hour sequences match data.load() training and validation order; all existing encoders remain train-fitted and test is never accessed."
+    ]
+  },
+  "success": true,
+  "metrics": {
+    "GAUC": 0.6706213118939652,
+    "nDCG@5": 0.5375735107077644,
+    "primary": 0.6040974113008648,
+    "users": 22377.0,
+    "rows": 124909.0
+  },
+  "error": null,
+  "wall_seconds": 15.38800597190857,
+  "candidate_changed": true,
+  "candidate_fingerprint": "e5846b48361004d0016ddc2afc097e48267be29acaf2ab51957e1d4355e161d9",
+  "seed": 0,
+  "trial_config": {
+    "embed_dim": 16,
+    "cross_layers": 2,
+    "hidden": 96,
+    "lr": 0.001,
+    "weight_decay": 1e-06,
+    "epochs": 20,
+    "batch_size": 4096,
+    "patience": 4
+  },
+  "sanity_check": null,
+  "change_summary": {
+    "hunks": 3,
+    "lines_added": 24,
+    "lines_removed": 1,
+    "parent_lines": 107,
+    "is_rewrite": false
+  },
+  "prediction_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_006/.harness/validation_predictions_6727a49c98404309b789a604721ee8df_seed_0.csv",
+  "prediction_sha256": "c22e07e7067dd7862ab4f5a6d558d807f11d9752f763706931dc4f90dfc6032e",
+  "execution_id": "6727a49c98404309b789a604721ee8df",
+  "source_sha256": "7918e9b0596bb7bb9fee14b80b49087498f7c1ba6d9bf55ac3cb990272580c2d",
+  "source_snapshot_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_006/.harness/executions/6727a49c98404309b789a604721ee8df/model.py",
+  "resource_usage": {
+    "cpu_user_seconds": 14.62003900000002,
+    "cpu_system_seconds": 0.7251719999999988,
+    "peak_rss_platform_units": 1037844480,
+    "timeout_seconds": 1800,
+    "accelerator": "not_measured"
+  },
+  "execution_class": "substantial",
+  "execution_grant": {
+    "granted": true,
+    "requested_class": "substantial",
+    "granted_class": "substantial",
+    "timeout_seconds": 1800,
+    "remaining_wall_seconds": 20454.7,
+    "reason": "requested class 'substantial' granted at 1800s"
+  },
+  "execution_attempted": true
+}

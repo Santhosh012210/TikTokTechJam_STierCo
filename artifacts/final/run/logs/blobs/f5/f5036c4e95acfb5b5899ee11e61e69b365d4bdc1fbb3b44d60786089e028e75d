@@ -1,0 +1,30 @@
+{
+  "query": "recommendation train-only smoothed item target encoding Bayesian shrinkage ranking feature leakage control",
+  "results": [
+    {
+      "chunk_id": "target-encoding#why-it-helps-a-ranking-metric",
+      "method": "target-encoding",
+      "title": "Target encoding and historical-rate features",
+      "section": "Why it helps a ranking metric",
+      "score": 13.8567,
+      "text": "It converts an ID that a tree cannot split on, and that an embedding model can only learn\nslowly from sparse observations, into a single dense informative number.\n\nFor a within-user ranking metric, note which encodings can help: **item-side encodings\nvary within a user's list and can reorder it; user-side encodings cannot.** An item's\nhistorical positive rate is a usable feature. A user's historical positive rate is\nconstant across that user's rows and contributes nothing on its own — it is only useful\ncrossed with something item-side.\n\nThis is the main mechanism by which a GBDT becomes competitive on ID-heavy recommendation\ndata, since trees cannot consume raw IDs."
+    },
+    {
+      "chunk_id": "target-encoding#what-it-is",
+      "method": "target-encoding",
+      "title": "Target encoding and historical-rate features",
+      "section": "What it is",
+      "score": 13.3633,
+      "text": "Replace a high-cardinality categorical value with a statistic of the target computed over\nrows sharing that value — most often the smoothed historical positive rate:\n\n    encoded(c) = (sum_of_positives(c) + m * prior) / (count(c) + m)\n\n`prior` is the global positive rate and `m` is a smoothing constant, typically 10-100.\nSmoothing pulls rare categories towards the global mean so a category seen twice with two\npositives does not encode as 1.0."
+    },
+    {
+      "chunk_id": "target-encoding#when-it-will-not-help",
+      "method": "target-encoding",
+      "title": "Target encoding and historical-rate features",
+      "section": "When it will not help",
+      "score": 12.5438,
+      "text": "- A model that already learns ID embeddings gets less from target encoding, because the\n  embedding is a richer version of the same information. The gain is largest for trees.\n- Rare categories encode almost entirely to the prior and carry no information no matter\n  how the smoothing is tuned.\n- Any leak makes the feature look excellent on validation and worthless on test. If a\n  target-encoded feature produces a suspiciously large jump, audit the time ordering\n  before believing it."
+    }
+  ],
+  "bootstrap_counted": true
+}

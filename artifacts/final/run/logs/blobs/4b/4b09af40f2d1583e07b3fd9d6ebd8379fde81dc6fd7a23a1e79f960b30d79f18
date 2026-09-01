@@ -1,0 +1,73 @@
+{
+  "hypothesis": "Replacing pointwise BCE with complete within-user listwise softmax over discriminative logged-impression lists will improve GAUC/nDCG@5 by directly contrasting each positive against all of that user's negatives and concentrating gradient on highly scored candidates.",
+  "reasoning": "The official task ranks only within user. Literature listwise-softmax#what-it-is defines a whole-list softmax objective, and listwise-softmax#why-it-helps-a-ranking-metric explains its top-weighted gradients align with nDCG@5. This is materially different from the prior corrected one-negative BPR, which improved only +0.000690. The candidate preserves the five-field FM, train split, validation checkpoint protocol, and uses full user lists with assertions to isolate loss behavior.",
+  "literature_chunk_ids": [
+    "listwise-softmax#what-it-is",
+    "listwise-softmax#why-it-helps-a-ranking-metric",
+    "negative-sampling#what-it-is"
+  ],
+  "proposal": {
+    "target_component": "loss",
+    "expected_effect": "Target +0.003 primary versus the reproduced 0.601469 pointwise FM, with particular potential nDCG@5 improvement from listwise top-focused gradients.",
+    "falsification_criterion": "A valid seeded run fails to improve primary by at least 0.0020 over 0.601469, or materially degrades both GAUC and nDCG@5.",
+    "rollback_plan": "Retain the pointwise FM incumbent and mark this complete-list listwise loss variant unsupported; pursue the distinct positive-history sequence branch next.",
+    "feature_sources": [
+      "data.load() training interaction user_id and the inherited five categorical fields"
+    ],
+    "feature_transformations": [
+      "Stable user grouping of train rows; shuffled batches of complete discriminative user impression lists; per-list positive-normalized softmax loss over all logged candidates."
+    ],
+    "leakage_controls": [
+      "Only train rows and train long_view labels form loss groups; validation labels are used only by unchanged early stopping/evaluator.",
+      "No validation rows, outcomes, or future interactions are included in the listwise lists.",
+      "Encoded fields and unknown handling remain the organizer train-fitted encode() implementation."
+    ]
+  },
+  "success": true,
+  "metrics": {
+    "GAUC": 0.6640492363252576,
+    "nDCG@5": 0.5349777949034659,
+    "primary": 0.5995135156143617,
+    "users": 22377.0,
+    "rows": 124909.0
+  },
+  "error": null,
+  "wall_seconds": 20.4221408367157,
+  "candidate_changed": true,
+  "candidate_fingerprint": "4872a31149a8aa34f796e5b4d200692e56452ed9c2a57561f93d112731e3a475",
+  "seed": 0,
+  "trial_config": {
+    "epochs": 40,
+    "groups_per_batch": 256
+  },
+  "sanity_check": null,
+  "change_summary": {
+    "hunks": 4,
+    "lines_added": 54,
+    "lines_removed": 5,
+    "parent_lines": 146,
+    "is_rewrite": false
+  },
+  "prediction_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_001/.harness/validation_predictions_c0fa8ffc86d541b6bf2f86e94a4c069f_seed_0.csv",
+  "prediction_sha256": "a7f386ea6cea52908aeb53963fedb8b56ce4a8040accf29880e96d4e5d53299f",
+  "execution_id": "c0fa8ffc86d541b6bf2f86e94a4c069f",
+  "source_sha256": "6ad76280f21e291e3a4e4b61c932c5b39ee49019c1d41e61792de7ed039ec292",
+  "source_snapshot_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_001/.harness/executions/c0fa8ffc86d541b6bf2f86e94a4c069f/model.py",
+  "resource_usage": {
+    "cpu_user_seconds": 14.260300999999998,
+    "cpu_system_seconds": 0.692329,
+    "peak_rss_platform_units": 672382976,
+    "timeout_seconds": 1800,
+    "accelerator": "not_measured"
+  },
+  "execution_class": "substantial",
+  "execution_grant": {
+    "granted": true,
+    "requested_class": "substantial",
+    "granted_class": "substantial",
+    "timeout_seconds": 1800,
+    "remaining_wall_seconds": 21108.0,
+    "reason": "requested class 'substantial' granted at 1800s"
+  },
+  "execution_attempted": true
+}

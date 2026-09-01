@@ -1,0 +1,98 @@
+{
+  "success": true,
+  "status": "TASK_CONTEXT_RECORDED_AND_RETAINED",
+  "task_context": {
+    "task_objective": "Within-user ranking of each user's logged evaluation impressions for long-view relevance; improve the fixed primary score, the mean of GAUC and nDCG@5.",
+    "target_label": "long_view, the native binary 0/1 relevance label.",
+    "metrics": [
+      "GAUC (within-user, only users with both classes, weighted by positive count)",
+      "nDCG@5 (within-user; all-negative users contribute 0 and all-positive users contribute 1)",
+      "primary = mean(GAUC, nDCG@5)"
+    ],
+    "data_splits": {
+      "train": "20220408–20220421",
+      "validation": "20220422–20220428",
+      "test": "20220429–20220508 (hidden and never accessed during research)"
+    },
+    "baseline": "Official NumPy five-field FM (user_id, video_id, author_id, tab, dur_bucket), pointwise logistic loss, k=16, lr=0.001, batch=8192, up to 40 epochs/patience 4. Reproduced validation primary=0.6014687564 (GAUC=0.6671326322, nDCG@5=0.5358048805), consistent with the official validation reference within the 0.002 tolerance.",
+    "evaluation_protocol": [
+      "Train only on the official train partition and evaluate only on the official validation partition.",
+      "Rank only impressions belonging to the same user in the evaluation set; no full-corpus retrieval.",
+      "Scores need only preserve relative order but must be finite and aligned one-per-validation-row in data.load() order.",
+      "GAUC uses discriminative users only and positive-count weighting; nDCG@5 retains zero-positive users with score zero.",
+      "Validation labels may be used for baseline-style early stopping but cannot enter features or prediction construction."
+    ],
+    "hard_constraints": [
+      "Never access test rows, dates, or labels during research.",
+      "Never modify official starter-kit files or evaluate.py.",
+      "Candidate-data CSVs are immutable; joins, encoders, histories, and transformations run self-contained from candidate model.py over --data_dir.",
+      "Fit all vocabularies, bins, aggregates, histories, and target-derived statistics using train rows only; provide unknown defaults for cold items/users.",
+      "Preserve the prediction/submission helpers and candidate CLI contract; preserve row order because user-item pairs repeat.",
+      "Use fixed seeds for every stochastic source and make substantive model.py changes for each experiment.",
+      "Convergence/noise threshold is 0.002 primary."
+    ],
+    "known_dead_ends": [
+      "Organizer feature ablation: adding the organizer's 13 static CWM feature fields did not improve the baseline (primary 0.5940 versus 0.5950 with five fields); do not retry all 13 static fields as a standalone experiment.",
+      "Organizer capacity ablation: embedding dimension k=8/16/32 was effectively flat around 0.589; capacity alone is not the demonstrated bottleneck.",
+      "Purely user-side first-order features contribute zero to within-user ranking because they are constant within a user's candidate set.",
+      "Prior corrected same-user one-negative BPR/schedule improved only +0.000690 primary, below threshold; do not repeat that exact sampler and schedule.",
+      "Prior causal exposure-only DIN was a valid negative (0.596819 versus 0.604062 feature-FM parent); do not repeat that exposure-only sequence construction.",
+      "Prior leave-one-out target-rate/time FM reconstruction was negative; do not repeat that exact construction.",
+      "Original BPR implementation was broken by negative-negative pairing and is not evidence against BPR generally; never use a pair builder without positive/negative/distinct-row assertions."
+    ],
+    "promising_directions": [
+      "Ranking-aligned loss materially different from prior simple BPR, such as listwise sampled softmax, hard-negative, or top-weighted pair loss.",
+      "Leakage-safe positive-behavior histories, recency/affinity summaries, or SIM-style retrieval rather than exposure-only DIN.",
+      "Controlled extension or isolation of the prior improved train-only rate/context feature bundle, whose effects were confounded.",
+      "Multi-task long_view prediction with click/like/profile-entry auxiliary heads, extending rather than exactly rerunning the prior MMoE frontier.",
+      "Censored watch-time/progress modelling using only train-observed signals and robust candidate-varying transforms.",
+      "Time/context and temporal-shift features fitted on train only, with explicit validation-safe defaults.",
+      "A faithful PyTorch DeepFM/DCN/xDeepFM replacement if representation interactions are justified beyond embedding dimension alone."
+    ],
+    "feature_engineering_context": {
+      "baseline_fields": [
+        "user_id",
+        "video_id",
+        "author_id",
+        "tab",
+        "dur_bucket"
+      ],
+      "measured_dead_ends": [
+        "Organizer result: adding all 13 static CWM feature fields did not improve the five-field baseline (primary 0.5940 versus 0.5950).",
+        "Embedding dimension k=8/16/32 stayed flat around 0.589, so capacity alone is not the bottleneck.",
+        "Purely user-side first-order features cannot affect within-user ranking.",
+        "The exact prior leave-one-out rate/time reconstruction and exposure-only DIN are valid negative implementations."
+      ],
+      "promising_feature_families": [
+        "Train-only smoothed item/user long_view rate or count/context buckets, preferably controlled to isolate the previously confounded positive bundle.",
+        "Candidate-varying temporal context (hour/date or train-derived temporal reliability) robust to the observed label shift.",
+        "Positive behavioral history affinity/recency and candidate-to-history matching, with no future interactions.",
+        "Train-only watch-time/progress summaries and censored-watch-time targets.",
+        "Candidate-varying interactions of user state with item/context, rather than pure user-only terms."
+      ],
+      "leakage_controls": [
+        "All categorical vocabularies, bucket edges, rate/count aggregates, and target-derived statistics are fitted on train rows only.",
+        "For validation scoring, map unseen users/items/categories to explicit train-derived unknown/prior defaults; EDA reports 17 unseen-item validation rows and 1.59% unseen-user rows.",
+        "Construct histories causally from prior train interactions only (or prefixes that exclude the scored event and any validation labels); do not use validation outcome columns.",
+        "Do not aggregate validation labels, use validation rows to fit transformations, or key predictions by repeated user-item pairs; write in loader row order."
+      ],
+      "implementation_boundary": "Feature code runs self-contained from candidate model.py over immutable candidate_data inputs (or hashed local candidate helpers), retaining the inherited prediction writers and CLI contract."
+    },
+    "candidate_contract": [
+      "Accept exactly --data_dir, --seed, --prediction-path with optional --trial-config, or --submission-path for finalization.",
+      "Declare accepted trial-config keys and reject unknown keys.",
+      "Write row_id,user_id,video_id,score with contiguous zero-based row_id and one finite validation score per data.load() validation row.",
+      "Seed NumPy, PyTorch/random if used, and any sampler; restore the best validation checkpoint if early stopping.",
+      "Keep write_validation_predictions and write_hidden_submission inside model.py; research runs only use --prediction-path."
+    ],
+    "source_paths": [
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/README.md",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/evaluate.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/data.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/ablation_features.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_000/model.py"
+    ]
+  },
+  "instruction": "Use this retained benchmark context together with literature evidence for this and every later experiment."
+}

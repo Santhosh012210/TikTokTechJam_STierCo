@@ -1,0 +1,74 @@
+{
+  "hypothesis": "A seeded DCN-V2 with two explicit matrix cross layers and a small deep tower over the unchanged five organizer fields will improve within-user long-view ranking over pairwise FM by learning bounded higher-order user-item-author-tab-duration interactions.",
+  "reasoning": "The five-field FM captures linear and pairwise terms only. DCN-V2 is a distinct model-family test, not the ruled-out embedding-dimension-only change: dcn#what-it-is states cross layers represent interactions up to degree L+1, and dcn#why-it-helps-a-ranking-metric identifies their efficient structured crossing. The counterargument in dcn#when-it-will-not-help is directly tested by this bounded validation run; no feature additions confound attribution.",
+  "literature_chunk_ids": [
+    "dcn#what-it-is",
+    "dcn#why-it-helps-a-ranking-metric",
+    "dcn#when-it-will-not-help"
+  ],
+  "proposal": {
+    "target_component": "model",
+    "expected_effect": "Expected +0.003 primary against 0.601469 if higher-order context crosses contain usable signal, otherwise the documented flat-capacity evidence predicts no gain.",
+    "falsification_criterion": "With stable training, restored best checkpoint, and no output-contract failure, DCN-V2 does not improve primary by at least 0.0020 over 0.601469.",
+    "rollback_plan": "Retain the pointwise five-field FM incumbent and regard this specific five-field DCN-V2 representation as unsupported; prioritize the positive-behavior history or multi-task branch rather than further capacity-only tuning.",
+    "feature_sources": [
+      "The inherited encoded five fields: user_id, video_id, author_id, tab, dur_bucket."
+    ],
+    "feature_transformations": [
+      "No new candidate-data feature transforms; DCN-V2 replaces FM pairwise interaction with two explicit matrix cross layers plus a 96→48 ReLU tower."
+    ],
+    "leakage_controls": [
+      "Organizer data.encode() fits categorical vocabularies and duration bucket edges on train only and provides unknown IDs for validation.",
+      "Only training labels enter BCE optimization; validation labels are used solely for fixed official early stopping/evaluation.",
+      "No test split, validation-derived feature, or external data is accessed."
+    ]
+  },
+  "success": false,
+  "metrics": null,
+  "error": "model.py exited 1\nTraceback (most recent call last):\n  File \"/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_003/model.py\", line 104, in <module>\n    print(json.dumps({'status': 'predictions_written', 'rows': len(valid_scores), 'best_primary': best}))\n          ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/json/__init__.py\", line 235, in dumps\n    return _default_encoder.encode(obj)\n           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^\n  File \"/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/json/encoder.py\", line 202, in encode\n    chunks = self.iterencode(o, _one_shot=True)\n  File \"/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/json/encoder.py\", line 263, in iterencode\n    return _iterencode(o, 0)\n  File \"/opt/homebrew/Cellar/python@3.13/3.13.13_1/Frameworks/Python.framework/Versions/3.13/lib/python3.13/json/encoder.py\", line 182, in default\n    raise TypeError(f'Object of type {o.__class__.__name__} '\n                    f'is not JSON serializable')\nTypeError: Object of type float32 is not JSON serializable\n",
+  "wall_seconds": 12.285751104354858,
+  "candidate_changed": true,
+  "candidate_fingerprint": "0ba4095daed21bc5433bae8ae2ae6d0e4e9e6657c77f9ca460f356ce4d2901b5",
+  "seed": 0,
+  "trial_config": {
+    "embed_dim": 16,
+    "cross_layers": 2,
+    "hidden": 96,
+    "lr": 0.001,
+    "weight_decay": 1e-06,
+    "epochs": 20,
+    "batch_size": 4096,
+    "patience": 4
+  },
+  "sanity_check": null,
+  "change_summary": {
+    "hunks": 21,
+    "lines_added": 70,
+    "lines_removed": 109,
+    "parent_lines": 146,
+    "is_rewrite": true,
+    "attribution_warning": "This experiment replaced 109 of 146 inherited lines. A wholesale rewrite bundles every change together, so a score move cannot be attributed to any one of them. Prefer edit_file for a targeted change; if a full replacement is genuinely required (a different model family, say), say so in the reflection and treat the result as evidence about the bundle rather than about one idea."
+  },
+  "prediction_path": null,
+  "prediction_sha256": null,
+  "execution_id": "7a8370887d20458b9e1a494307e9675e",
+  "source_sha256": "ea5156bf2fec7e23daa42b2b57f0f3cdfe7d75884f15248d071253a9fce037e8",
+  "source_snapshot_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_003/.harness/executions/7a8370887d20458b9e1a494307e9675e/model.py",
+  "resource_usage": {
+    "cpu_user_seconds": 11.418429000000003,
+    "cpu_system_seconds": 0.7129409999999998,
+    "peak_rss_platform_units": 980631552,
+    "timeout_seconds": 1800,
+    "accelerator": "not_measured"
+  },
+  "execution_class": "substantial",
+  "execution_grant": {
+    "granted": true,
+    "requested_class": "substantial",
+    "granted_class": "substantial",
+    "timeout_seconds": 1800,
+    "remaining_wall_seconds": 20885.8,
+    "reason": "requested class 'substantial' granted at 1800s"
+  },
+  "execution_attempted": true
+}

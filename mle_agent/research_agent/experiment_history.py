@@ -1,4 +1,4 @@
-"""Cross-run memory of every scored experiment, written by the harness.
+"""Operational history of every scored experiment, written by the harness.
 
 Within a run the agent already cannot repeat itself: ``seen_candidate_fingerprints``
 catches identical candidate code, ``_repeats_measured_dead_end`` catches the two
@@ -24,6 +24,10 @@ This module is that missing memory. Two deliberate constraints:
 
 Rows are appended per experiment rather than per run, so a run that crashes at
 iteration 20 still contributes the 19 results it earned.
+
+The agent-facing interpretation lives in ``prompts/prior_findings.md``. This raw
+ledger supplies audit history and exact candidate fingerprints; it is deliberately
+not injected wholesale into the model's context.
 """
 from __future__ import annotations
 

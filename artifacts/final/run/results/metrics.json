@@ -1,0 +1,1740 @@
+{
+  "run_id": "20260901_012832",
+  "architecture": "immutable_candidate_frontier",
+  "provider": "langchain / openai / gpt-5.6-terra",
+  "task_definition_confirmed": true,
+  "stop_reason": "converged",
+  "converged": true,
+  "run_config": {
+    "max_iterations": 50,
+    "wall_hours": 6.0,
+    "bootstrap_model_calls": 32,
+    "experiment_model_calls": 24,
+    "max_quota_resumes_per_invocation": 3,
+    "max_quota_wait_seconds": 300.0,
+    "frontier_branch_trials": 4,
+    "frontier_top_k": 3,
+    "minimum_experiments_before_convergence": 8
+  },
+  "convergence": {
+    "epsilon": 0.002,
+    "patience": 3,
+    "incumbent_history": [
+      0.601468756352959,
+      0.601468756352959,
+      0.601468756352959,
+      0.6038858121462249,
+      0.6038858121462249,
+      0.6038858121462249,
+      0.6040974113008648,
+      0.6040974113008648,
+      0.6040974113008648
+    ],
+    "frontier_history": [
+      [
+        0.6012558773397176
+      ],
+      [
+        0.6012558773397176,
+        0.5993572769204436
+      ],
+      [
+        0.6012558773397176,
+        0.60068566434553,
+        0.5993572769204436
+      ],
+      [
+        0.6038238203292724,
+        0.6012558773397176,
+        0.60068566434553
+      ],
+      [
+        0.6038238203292724,
+        0.6020613073506521,
+        0.6012558773397176
+      ],
+      [
+        0.6038238203292724,
+        0.6035159183604343,
+        0.6020613073506521
+      ],
+      [
+        0.604094738268571,
+        0.6038238203292724,
+        0.6035159183604343
+      ],
+      [
+        0.604094738268571,
+        0.6038238203292724,
+        0.6036393577643954
+      ],
+      [
+        0.604094738268571,
+        0.6038238203292724,
+        0.6036393577643954
+      ]
+    ]
+  },
+  "baseline_valid_metrics": {
+    "GAUC": 0.6674,
+    "nDCG@5": 0.5357,
+    "primary": 0.6016
+  },
+  "official_baseline_reference": {
+    "baseline_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py",
+    "baseline_sha256": "34d7bfc4b545a38a52dabf3084791e7c7dd6b911eca0e713fb707a6379156d27",
+    "scores_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline_scores.json",
+    "scores_sha256": "9a0c3575b31684dc8ef4d0762068796ff544b225f42d9bcaf8d53573082df1a5",
+    "config": {
+      "model": "FM",
+      "k": 16,
+      "lr": 0.001,
+      "batch": 8192,
+      "max_epochs": 40,
+      "patience": 4,
+      "fields": [
+        "user_id",
+        "video_id",
+        "author_id",
+        "tab",
+        "dur_bucket"
+      ]
+    },
+    "published_valid": {
+      "GAUC": 0.6674,
+      "nDCG@5": 0.5357,
+      "primary": 0.6016
+    },
+    "published_hidden_test": {
+      "GAUC": 0.661,
+      "nDCG@5": 0.5282,
+      "primary": 0.5946
+    },
+    "published_hidden_test_std_over_5_seeds": {
+      "test_GAUC": 0.0008,
+      "test_nDCG@5": 0.0008,
+      "test_primary": 0.0008
+    },
+    "comparison_split": "validation",
+    "hidden_test_was_not_scored": true
+  },
+  "official_hidden_test_baseline_metrics": {
+    "GAUC": 0.661,
+    "nDCG@5": 0.5282,
+    "primary": 0.5946
+  },
+  "baseline_valid_primary": 0.6016,
+  "reproduced_baseline_valid_primary": 0.601468756352959,
+  "best_trial": 7,
+  "best_node_id": 7,
+  "best_valid_metrics": {
+    "GAUC": 0.6706213118939652,
+    "nDCG@5": 0.5375735107077644,
+    "primary": 0.6040974113008648,
+    "users": 22377.0,
+    "rows": 124909.0
+  },
+  "best_valid_primary": 0.6040974113008648,
+  "best_conservative_primary": 0.604094738268571,
+  "best_trial_stability": {
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "primary_mean": 0.6042930791631571,
+    "primary_std": 0.00019834089458614374,
+    "successful_seed_count": 5,
+    "per_seed": {
+      "0": {
+        "GAUC": 0.6706213118939652,
+        "nDCG@5": 0.5375735107077644,
+        "primary": 0.6040974113008648,
+        "users": 22377.0,
+        "rows": 124909.0
+      },
+      "1": {
+        "GAUC": 0.6711369178331283,
+        "nDCG@5": 0.5380324400488702,
+        "primary": 0.6045846789409992,
+        "users": 22377.0,
+        "rows": 124909.0
+      },
+      "2": {
+        "GAUC": 0.6706424766407896,
+        "nDCG@5": 0.5378958368041941,
+        "primary": 0.6042691567224918,
+        "users": 22377.0,
+        "rows": 124909.0
+      },
+      "3": {
+        "GAUC": 0.6705988855073793,
+        "nDCG@5": 0.5375405254512492,
+        "primary": 0.6040697054793143,
+        "users": 22377.0,
+        "rows": 124909.0
+      },
+      "4": {
+        "GAUC": 0.6711441268554139,
+        "nDCG@5": 0.5377447598888173,
+        "primary": 0.6044444433721157,
+        "users": 22377.0,
+        "rows": 124909.0
+      }
+    }
+  },
+  "best_trial_config": {
+    "embed_dim": 16,
+    "cross_layers": 2,
+    "hidden": 96,
+    "lr": 0.001,
+    "weight_decay": 1e-06,
+    "epochs": 20,
+    "batch_size": 4096,
+    "patience": 4
+  },
+  "best_seed": 0,
+  "best_source_sha256": "7918e9b0596bb7bb9fee14b80b49087498f7c1ba6d9bf55ac3cb990272580c2d",
+  "best_bundle_manifest": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_007/bundle.json",
+  "stability_seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "metric_deltas_vs_baseline": {
+    "GAUC": 0.0032213118939652396,
+    "nDCG@5": 0.0018735107077644253,
+    "primary": 0.0024974113008647825
+  },
+  "delta_vs_baseline": 0.0024974113008647825,
+  "validation_beats_official_baseline": true,
+  "hidden_test_comparison_status": "unmeasured; only the organizer can determine whether the final submission beats published hidden-test primary 0.5946",
+  "attempted_agent_experiments": 9,
+  "successful_agent_experiments": 8,
+  "failed_agent_experiments": 1,
+  "aborted_agent_iterations": 0,
+  "trajectory": [
+    {
+      "iteration": 0,
+      "status": "success",
+      "primary": 0.601468756352959,
+      "incumbent_primary": 0.601468756352959,
+      "is_new_best": true
+    },
+    {
+      "iteration": 1,
+      "node_id": 1,
+      "parent_node_id": 0,
+      "status": "success",
+      "primary": 0.5995135156143617,
+      "incumbent_primary": 0.601468756352959,
+      "is_new_best": false
+    },
+    {
+      "iteration": 2,
+      "node_id": 2,
+      "parent_node_id": 0,
+      "status": "success",
+      "primary": 0.6005099415245124,
+      "incumbent_primary": 0.601468756352959,
+      "is_new_best": false
+    },
+    {
+      "iteration": 3,
+      "node_id": 3,
+      "parent_node_id": 0,
+      "status": "success",
+      "primary": 0.6038858121462249,
+      "incumbent_primary": 0.6038858121462249,
+      "is_new_best": true
+    },
+    {
+      "iteration": 4,
+      "node_id": 5,
+      "parent_node_id": 0,
+      "status": "success",
+      "primary": 0.6025096253599349,
+      "incumbent_primary": 0.6038858121462249,
+      "is_new_best": false
+    },
+    {
+      "iteration": 5,
+      "node_id": 6,
+      "parent_node_id": 3,
+      "status": "success",
+      "primary": 0.6036202293263735,
+      "incumbent_primary": 0.6038858121462249,
+      "is_new_best": false
+    },
+    {
+      "iteration": 6,
+      "node_id": 7,
+      "parent_node_id": 3,
+      "status": "success",
+      "primary": 0.6040974113008648,
+      "incumbent_primary": 0.6040974113008648,
+      "is_new_best": true
+    },
+    {
+      "iteration": 7,
+      "node_id": 8,
+      "parent_node_id": 7,
+      "status": "success",
+      "primary": 0.6039574997074094,
+      "incumbent_primary": 0.6040974113008648,
+      "is_new_best": false
+    },
+    {
+      "iteration": 8,
+      "node_id": 9,
+      "parent_node_id": 8,
+      "status": "success",
+      "primary": 0.6029936659717787,
+      "incumbent_primary": 0.6040974113008648,
+      "is_new_best": false
+    }
+  ],
+  "tokens": {
+    "input": 2836062,
+    "output": 29604
+  },
+  "gpu_hours": 0.0,
+  "total_wall_seconds": 1256.069350719452,
+  "manual_interventions": 0,
+  "llm_trace": {
+    "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/artifacts/runs/20260901_012832/logs/llm_events.jsonl",
+    "events": 155,
+    "llm_response": 64,
+    "tool_result": 67,
+    "provider_error": 0,
+    "quota_pause": 0,
+    "bootstrap_prefetch_step": 14,
+    "bootstrap_prefetch": 1,
+    "memory_compaction": 9
+  },
+  "best_workspace_code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_007/model.py",
+  "candidate_frontier": {
+    "total_iters": 10,
+    "conservative_best_node_id": 7,
+    "nodes": {
+      "0": {
+        "id": 0,
+        "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_000/model.py",
+        "hypothesis": "Reproduce the official FM baseline",
+        "primary": 0.601468756352959,
+        "parent_id": null,
+        "depth": 0,
+        "status": "success",
+        "target_component": "baseline",
+        "source_sha256": "3098287eeaae98e05049f646c5a330659bb74823b45214e1af45dd71628aeab3",
+        "trial_config": {},
+        "seed": 0,
+        "metrics": {
+          "GAUC": 0.6671326321610643,
+          "nDCG@5": 0.5358048805448538,
+          "primary": 0.601468756352959,
+          "users": 22377.0,
+          "rows": 124909.0
+        },
+        "stability": {
+          "seeds": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "primary_mean": 0.6015720538282145,
+          "primary_std": 0.0003161764884969078,
+          "successful_seed_count": 5,
+          "per_seed": {
+            "0": {
+              "GAUC": 0.6671326321610643,
+              "nDCG@5": 0.5358048805448538,
+              "primary": 0.601468756352959,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "1": {
+              "GAUC": 0.6673954513271534,
+              "nDCG@5": 0.5361264979255713,
+              "primary": 0.6017609746263624,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "2": {
+              "GAUC": 0.6670635117150168,
+              "nDCG@5": 0.5351164495629801,
+              "primary": 0.6010899806389984,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "3": {
+              "GAUC": 0.6674614320871909,
+              "nDCG@5": 0.5355452797368637,
+              "primary": 0.6015033559120273,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "4": {
+              "GAUC": 0.6679479198936048,
+              "nDCG@5": 0.536126483327846,
+              "primary": 0.6020372016107254,
+              "users": 22377.0,
+              "rows": 124909.0
+            }
+          }
+        },
+        "children": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "visits": 10,
+        "reward_sum": -0.0006138597610998442,
+        "mean_reward": -6.138597610998442e-05,
+        "conservative_primary": 0.6012558773397176,
+        "frozen": true
+      },
+      "1": {
+        "id": 1,
+        "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_001/model.py",
+        "hypothesis": "Replacing pointwise BCE with complete within-user listwise softmax over discriminative logged-impression lists will improve GAUC/nDCG@5 by directly contrasting each positive against all of that user's negatives and concentrating gradient on highly scored candidates.",
+        "primary": 0.5995135156143617,
+        "parent_id": 0,
+        "depth": 1,
+        "status": "success",
+        "target_component": "loss",
+        "source_sha256": "6ad76280f21e291e3a4e4b61c932c5b39ee49019c1d41e61792de7ed039ec292",
+        "trial_config": {
+          "epochs": 40,
+          "groups_per_batch": 256
+        },
+        "seed": 0,
+        "metrics": {
+          "GAUC": 0.6640492363252576,
+          "nDCG@5": 0.5349777949034659,
+          "primary": 0.5995135156143617,
+          "users": 22377.0,
+          "rows": 124909.0
+        },
+        "stability": {
+          "seeds": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "primary_mean": 0.5995060602881378,
+          "primary_std": 0.00014878336769422694,
+          "successful_seed_count": 5,
+          "per_seed": {
+            "0": {
+              "GAUC": 0.6640492363252576,
+              "nDCG@5": 0.5349777949034659,
+              "primary": 0.5995135156143617,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "1": {
+              "GAUC": 0.6634315510672106,
+              "nDCG@5": 0.5351957088957409,
+              "primary": 0.5993136299814757,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "2": {
+              "GAUC": 0.6640704478355782,
+              "nDCG@5": 0.5349888045850957,
+              "primary": 0.5995296262103369,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "3": {
+              "GAUC": 0.664560484532909,
+              "nDCG@5": 0.5349595004464084,
+              "primary": 0.5997599924896586,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "4": {
+              "GAUC": 0.6640068387415837,
+              "nDCG@5": 0.5348202355481284,
+              "primary": 0.5994135371448561,
+              "users": 22377.0,
+              "rows": 124909.0
+            }
+          }
+        },
+        "children": [],
+        "visits": 1,
+        "reward_sum": -0.001955240738597319,
+        "mean_reward": -0.001955240738597319,
+        "conservative_primary": 0.5993572769204436,
+        "frozen": true
+      },
+      "2": {
+        "id": 2,
+        "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_002/model.py",
+        "hypothesis": "A single OOF-smoothed train-item long_view-rate bucket appended to the five-field pointwise FM will improve within-user ranking by supplying a candidate-varying historical-quality signal while avoiding each training row's own-label leakage.",
+        "primary": 0.6005099415245124,
+        "parent_id": 0,
+        "depth": 1,
+        "status": "success",
+        "target_component": "features",
+        "source_sha256": "6e8a5348e4dbaf4ebfc63cb7872dc3c080622f27de935fb7637b34982a484aec",
+        "trial_config": {
+          "epochs": 40,
+          "rate_smoothing": 50.0,
+          "rate_bins": 16
+        },
+        "seed": 0,
+        "metrics": {
+          "GAUC": 0.6656296859400509,
+          "nDCG@5": 0.535390197108974,
+          "primary": 0.6005099415245124,
+          "users": 22377.0,
+          "rows": 124909.0
+        },
+        "stability": {
+          "seeds": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "primary_mean": 0.6010902173012439,
+          "primary_std": 0.0004045529557139827,
+          "successful_seed_count": 5,
+          "per_seed": {
+            "0": {
+              "GAUC": 0.6656296859400509,
+              "nDCG@5": 0.535390197108974,
+              "primary": 0.6005099415245124,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "1": {
+              "GAUC": 0.6673768620988686,
+              "nDCG@5": 0.5359799253848844,
+              "primary": 0.6016783937418765,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "2": {
+              "GAUC": 0.6665302424808373,
+              "nDCG@5": 0.5352658765941976,
+              "primary": 0.6008980595375174,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "3": {
+              "GAUC": 0.6671379576739793,
+              "nDCG@5": 0.5356310705760999,
+              "primary": 0.6013845141250396,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "4": {
+              "GAUC": 0.6663521231828404,
+              "nDCG@5": 0.5356082319717066,
+              "primary": 0.6009801775772735,
+              "users": 22377.0,
+              "rows": 124909.0
+            }
+          }
+        },
+        "children": [],
+        "visits": 1,
+        "reward_sum": -0.0009588148284466191,
+        "mean_reward": -0.0009588148284466191,
+        "conservative_primary": 0.60068566434553,
+        "frozen": true
+      },
+      "3": {
+        "id": 3,
+        "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_003/model.py",
+        "hypothesis": "A seeded DCN-V2 with two explicit matrix cross layers and a small deep tower over the unchanged five organizer fields will improve within-user long-view ranking over pairwise FM by learning bounded higher-order user-item-author-tab-duration interactions.",
+        "primary": 0.6038858121462249,
+        "parent_id": 0,
+        "depth": 1,
+        "status": "success",
+        "target_component": "model",
+        "source_sha256": "bc672f3fadd4cfe8b2848ebb2d15abb2ff627a9737c226a922e3fff41913c433",
+        "trial_config": {
+          "embed_dim": 16,
+          "cross_layers": 2,
+          "hidden": 96,
+          "lr": 0.001,
+          "weight_decay": 1e-06,
+          "epochs": 20,
+          "batch_size": 4096,
+          "patience": 4
+        },
+        "seed": 0,
+        "metrics": {
+          "GAUC": 0.6705164336994126,
+          "nDCG@5": 0.5372551905930373,
+          "primary": 0.6038858121462249,
+          "users": 22377.0,
+          "rows": 124909.0
+        },
+        "stability": {
+          "seeds": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "primary_mean": 0.6040324864392798,
+          "primary_std": 0.0002086661100073749,
+          "successful_seed_count": 5,
+          "per_seed": {
+            "0": {
+              "GAUC": 0.6705164336994126,
+              "nDCG@5": 0.5372551905930373,
+              "primary": 0.6038858121462249,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "1": {
+              "GAUC": 0.67033502080377,
+              "nDCG@5": 0.537165889320282,
+              "primary": 0.6037504550620261,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "2": {
+              "GAUC": 0.6707367423143182,
+              "nDCG@5": 0.5372904274560788,
+              "primary": 0.6040135848851985,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "3": {
+              "GAUC": 0.671229240334003,
+              "nDCG@5": 0.5374628908698602,
+              "primary": 0.6043460656019316,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "4": {
+              "GAUC": 0.6708438411359486,
+              "nDCG@5": 0.5374891878660863,
+              "primary": 0.6041665145010175,
+              "users": 22377.0,
+              "rows": 124909.0
+            }
+          }
+        },
+        "children": [
+          6,
+          7
+        ],
+        "visits": 5,
+        "reward_sum": 0.00125932679896823,
+        "mean_reward": 0.000251865359793646,
+        "conservative_primary": 0.6038238203292724,
+        "frozen": true
+      },
+      "4": {
+        "id": 4,
+        "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_004/model.py",
+        "hypothesis": "A seeded DCN-V2 with two explicit matrix cross layers and a small deep tower over the unchanged five organizer fields will improve within-user long-view ranking over pairwise FM by learning bounded higher-order user-item-author-tab-duration interactions.",
+        "primary": -1.0,
+        "parent_id": 0,
+        "depth": 1,
+        "status": "failed",
+        "target_component": "model",
+        "source_sha256": "ea5156bf2fec7e23daa42b2b57f0f3cdfe7d75884f15248d071253a9fce037e8",
+        "trial_config": {
+          "embed_dim": 16,
+          "cross_layers": 2,
+          "hidden": 96,
+          "lr": 0.001,
+          "weight_decay": 1e-06,
+          "epochs": 20,
+          "batch_size": 4096,
+          "patience": 4
+        },
+        "seed": 0,
+        "metrics": {},
+        "stability": null,
+        "children": [],
+        "visits": 1,
+        "reward_sum": 0.0,
+        "mean_reward": 0.0,
+        "conservative_primary": null,
+        "frozen": true
+      },
+      "5": {
+        "id": 5,
+        "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_005/model.py",
+        "hypothesis": "Appending causal positive-history affinity bins for a candidate’s author and exact video to the five-field pointwise FM will improve within-user long-view ranking because candidate-dependent past positive behavior identifies durable interest, unlike the previously unsuccessful undifferentiated exposure-only DIN.",
+        "primary": 0.6025096253599349,
+        "parent_id": 0,
+        "depth": 1,
+        "status": "success",
+        "target_component": "sequence",
+        "source_sha256": "fb13eaa2e306628e4e0e39d338abccae8181fffce4cf6c658101c06cdbcf1396",
+        "trial_config": {
+          "k": 16,
+          "lr": 0.001,
+          "l2": 1e-06,
+          "epochs": 40,
+          "batch_size": 8192,
+          "patience": 4
+        },
+        "seed": 0,
+        "metrics": {
+          "GAUC": 0.6682038113725538,
+          "nDCG@5": 0.5368154393473161,
+          "primary": 0.6025096253599349,
+          "users": 22377.0,
+          "rows": 124909.0
+        },
+        "stability": {
+          "seeds": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "primary_mean": 0.6023228024740997,
+          "primary_std": 0.00026149512344765633,
+          "successful_seed_count": 5,
+          "per_seed": {
+            "0": {
+              "GAUC": 0.6682038113725538,
+              "nDCG@5": 0.5368154393473161,
+              "primary": 0.6025096253599349,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "1": {
+              "GAUC": 0.6683498491043984,
+              "nDCG@5": 0.5365832308168901,
+              "primary": 0.6024665399606443,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "2": {
+              "GAUC": 0.6678536220603002,
+              "nDCG@5": 0.5361978387129671,
+              "primary": 0.6020257303866337,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "3": {
+              "GAUC": 0.6686823309408889,
+              "nDCG@5": 0.536558312069434,
+              "primary": 0.6026203215051615,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "4": {
+              "GAUC": 0.6676788674890716,
+              "nDCG@5": 0.5363047228271771,
+              "primary": 0.6019917951581244,
+              "users": 22377.0,
+              "rows": 124909.0
+            }
+          }
+        },
+        "children": [],
+        "visits": 1,
+        "reward_sum": 0.0010408690069758642,
+        "mean_reward": 0.0010408690069758642,
+        "conservative_primary": 0.6020613073506521,
+        "frozen": true
+      },
+      "6": {
+        "id": 6,
+        "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_006/model.py",
+        "hypothesis": "A PLE-inspired shared/private multi-task extension of the five-field DCN-V2, trained on long_view plus click, like, and profile-entry labels with bounded auxiliary weights, will improve long_view ranking by regularizing shared item/context representations while preserving a dedicated long_view tower.",
+        "primary": 0.6036202293263735,
+        "parent_id": 3,
+        "depth": 2,
+        "status": "success",
+        "target_component": "auxiliary-task",
+        "source_sha256": "fcad4c5e7381c596ee86cecc437cd033e7add93574b4e95a34edd2e138c0f920",
+        "trial_config": {
+          "embed_dim": 16,
+          "cross_layers": 2,
+          "hidden": 96,
+          "lr": 0.001,
+          "weight_decay": 1e-06,
+          "epochs": 20,
+          "batch_size": 4096,
+          "patience": 4,
+          "aux_click_weight": 0.2,
+          "aux_like_weight": 0.35,
+          "aux_profile_weight": 0.25
+        },
+        "seed": 0,
+        "metrics": {
+          "GAUC": 0.6702390749153169,
+          "nDCG@5": 0.5370013837374301,
+          "primary": 0.6036202293263735,
+          "users": 22377.0,
+          "rows": 124909.0
+        },
+        "stability": {
+          "seeds": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "primary_mean": 0.604109599862087,
+          "primary_std": 0.0005936815016527288,
+          "successful_seed_count": 5,
+          "per_seed": {
+            "0": {
+              "GAUC": 0.6702390749153169,
+              "nDCG@5": 0.5370013837374301,
+              "primary": 0.6036202293263735,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "1": {
+              "GAUC": 0.6713554833874036,
+              "nDCG@5": 0.5376584629766241,
+              "primary": 0.6045069731820139,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "2": {
+              "GAUC": 0.6700689380365878,
+              "nDCG@5": 0.5373044084640205,
+              "primary": 0.6036866732503041,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "3": {
+              "GAUC": 0.6723193060306882,
+              "nDCG@5": 0.5378663404160559,
+              "primary": 0.6050928232233721,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "4": {
+              "GAUC": 0.6704723072545284,
+              "nDCG@5": 0.5368102934022148,
+              "primary": 0.6036413003283716,
+              "users": 22377.0,
+              "rows": 124909.0
+            }
+          }
+        },
+        "children": [],
+        "visits": 1,
+        "reward_sum": -0.00026558281985145094,
+        "mean_reward": -0.00026558281985145094,
+        "conservative_primary": 0.6035159183604343,
+        "frozen": true
+      },
+      "7": {
+        "id": 7,
+        "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_007/model.py",
+        "hypothesis": "Appending a train-vocabulary hour-of-day context field to the five-field DCN-V2 will improve within-user long-view ranking because hour varies across a user's candidates and enables user/item/tab/duration context crosses that can adapt to the documented temporal label shift.",
+        "primary": 0.6040974113008648,
+        "parent_id": 3,
+        "depth": 2,
+        "status": "success",
+        "target_component": "features",
+        "source_sha256": "7918e9b0596bb7bb9fee14b80b49087498f7c1ba6d9bf55ac3cb990272580c2d",
+        "trial_config": {
+          "embed_dim": 16,
+          "cross_layers": 2,
+          "hidden": 96,
+          "lr": 0.001,
+          "weight_decay": 1e-06,
+          "epochs": 20,
+          "batch_size": 4096,
+          "patience": 4
+        },
+        "seed": 0,
+        "metrics": {
+          "GAUC": 0.6706213118939652,
+          "nDCG@5": 0.5375735107077644,
+          "primary": 0.6040974113008648,
+          "users": 22377.0,
+          "rows": 124909.0
+        },
+        "stability": {
+          "seeds": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "primary_mean": 0.6042930791631571,
+          "primary_std": 0.00019834089458614374,
+          "successful_seed_count": 5,
+          "per_seed": {
+            "0": {
+              "GAUC": 0.6706213118939652,
+              "nDCG@5": 0.5375735107077644,
+              "primary": 0.6040974113008648,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "1": {
+              "GAUC": 0.6711369178331283,
+              "nDCG@5": 0.5380324400488702,
+              "primary": 0.6045846789409992,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "2": {
+              "GAUC": 0.6706424766407896,
+              "nDCG@5": 0.5378958368041941,
+              "primary": 0.6042691567224918,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "3": {
+              "GAUC": 0.6705988855073793,
+              "nDCG@5": 0.5375405254512492,
+              "primary": 0.6040697054793143,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "4": {
+              "GAUC": 0.6711441268554139,
+              "nDCG@5": 0.5377447598888173,
+              "primary": 0.6044444433721157,
+              "users": 22377.0,
+              "rows": 124909.0
+            }
+          }
+        },
+        "children": [
+          8
+        ],
+        "visits": 3,
+        "reward_sum": -0.0008921461744462178,
+        "mean_reward": -0.00029738205814873925,
+        "conservative_primary": 0.604094738268571,
+        "frozen": true
+      },
+      "8": {
+        "id": 8,
+        "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_008/model.py",
+        "hypothesis": "A train-only censored, duration-normalized watch-progress auxiliary head on the hour-context DCN will improve long_view ranking by learning graded engagement while avoiding duration bias and treating completed plays as lower-bounded observations.",
+        "primary": 0.6039574997074094,
+        "parent_id": 7,
+        "depth": 3,
+        "status": "success",
+        "target_component": "auxiliary-task",
+        "source_sha256": "a5c0006faf364ba138337dee22e092c8ecd3ef12fa63bb276622b589c4b54ed7",
+        "trial_config": {
+          "embed_dim": 16,
+          "cross_layers": 2,
+          "hidden": 96,
+          "lr": 0.001,
+          "weight_decay": 1e-06,
+          "epochs": 20,
+          "batch_size": 4096,
+          "patience": 4,
+          "progress_weight": 0.08
+        },
+        "seed": 0,
+        "metrics": {
+          "GAUC": 0.670337436487095,
+          "nDCG@5": 0.5375775629277239,
+          "primary": 0.6039574997074094,
+          "users": 22377.0,
+          "rows": 124909.0
+        },
+        "stability": {
+          "seeds": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "primary_mean": 0.6039243829400347,
+          "primary_std": 0.0002850251756393254,
+          "successful_seed_count": 5,
+          "per_seed": {
+            "0": {
+              "GAUC": 0.670337436487095,
+              "nDCG@5": 0.5375775629277239,
+              "primary": 0.6039574997074094,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "1": {
+              "GAUC": 0.6704005401236296,
+              "nDCG@5": 0.5369386255690453,
+              "primary": 0.6036695828463374,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "2": {
+              "GAUC": 0.6699910110499735,
+              "nDCG@5": 0.5374470164277015,
+              "primary": 0.6037190137388375,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "3": {
+              "GAUC": 0.6702234602508055,
+              "nDCG@5": 0.5374092197482268,
+              "primary": 0.6038163399995161,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "4": {
+              "GAUC": 0.6711151983055441,
+              "nDCG@5": 0.5378037585106022,
+              "primary": 0.6044594784080732,
+              "users": 22377.0,
+              "rows": 124909.0
+            }
+          }
+        },
+        "children": [
+          9
+        ],
+        "visits": 2,
+        "reward_sum": -0.001103745329086081,
+        "mean_reward": -0.0005518726645430405,
+        "conservative_primary": 0.6036393577643954,
+        "frozen": true
+      },
+      "9": {
+        "id": 9,
+        "code_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/frontier/node_009/model.py",
+        "hypothesis": "Appending an out-of-fold-smoothed train-only video×hour long_view-rate bucket to the hour-context DCN will improve within-user ranking by representing candidate-specific temporal reliability beyond raw hour alone.",
+        "primary": 0.6029936659717787,
+        "parent_id": 8,
+        "depth": 4,
+        "status": "success",
+        "target_component": "features",
+        "source_sha256": "566e1c3256e14ad9522f400454370d3fb16a3481a328b4c95c546a3dc0f1d8e6",
+        "trial_config": {
+          "embed_dim": 16,
+          "cross_layers": 2,
+          "hidden": 96,
+          "lr": 0.001,
+          "weight_decay": 1e-06,
+          "epochs": 20,
+          "batch_size": 4096,
+          "patience": 4,
+          "progress_weight": 0.08
+        },
+        "seed": 0,
+        "metrics": {
+          "GAUC": 0.6690874410170902,
+          "nDCG@5": 0.5368998909264674,
+          "primary": 0.6029936659717787,
+          "users": 22377.0,
+          "rows": 124909.0
+        },
+        "stability": {
+          "seeds": [
+            0,
+            1,
+            2,
+            3,
+            4
+          ],
+          "primary_mean": 0.6033304864955567,
+          "primary_std": 0.0002998682750690015,
+          "successful_seed_count": 5,
+          "per_seed": {
+            "0": {
+              "GAUC": 0.6690874410170902,
+              "nDCG@5": 0.5368998909264674,
+              "primary": 0.6029936659717787,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "1": {
+              "GAUC": 0.6693827959777706,
+              "nDCG@5": 0.5365328565052963,
+              "primary": 0.6029578262415334,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "2": {
+              "GAUC": 0.6699138809084857,
+              "nDCG@5": 0.5370520194527248,
+              "primary": 0.6034829501806053,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "3": {
+              "GAUC": 0.6702710977108419,
+              "nDCG@5": 0.5367524599388498,
+              "primary": 0.6035117788248459,
+              "users": 22377.0,
+              "rows": 124909.0
+            },
+            "4": {
+              "GAUC": 0.6701335019487304,
+              "nDCG@5": 0.5372789205693101,
+              "primary": 0.6037062112590204,
+              "users": 22377.0,
+              "rows": 124909.0
+            }
+          }
+        },
+        "children": [],
+        "visits": 1,
+        "reward_sum": -0.0009638337356306925,
+        "mean_reward": -0.0009638337356306925,
+        "conservative_primary": 0.6030306182204876,
+        "frozen": true
+      }
+    }
+  },
+  "inherited_champion": null,
+  "champion_archive": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/champions/20260901_012832",
+  "provider_cost": {
+    "estimated_spend_usd": 1.33479,
+    "cap_usd": 25.0
+  },
+  "prompt_templates": [
+    {
+      "name": "agent.md",
+      "path": "mle_agent/research_agent/prompts/agent.md",
+      "template_sha256": "336416d0893654423ec83467d163fe413434024cb540b937f696072626b41bfc"
+    },
+    {
+      "name": "prior_findings.md",
+      "path": "mle_agent/research_agent/prompts/prior_findings.md",
+      "template_sha256": "b09d2cb37527a529e902535805597b5b32b67781ea2415a8f437b49f17d14e30"
+    },
+    {
+      "name": "bootstrap.md",
+      "path": "mle_agent/research_agent/prompts/bootstrap.md",
+      "template_sha256": "994732e4cf1086b08e8fba50d654f5ff9a091c8f4b0bf7a5b1332d1ef6eaa5e2"
+    },
+    {
+      "name": "iteration.md",
+      "path": "mle_agent/research_agent/prompts/iteration.md",
+      "template_sha256": "dff84242b4769a34a2196a3a74462720a019e7dca4687a014e8f4725d1a1c964"
+    }
+  ],
+  "task_context_bootstrap": {
+    "required": true,
+    "complete": true,
+    "missing_requirements": [],
+    "discovery_completed": true,
+    "discovered_documents": [
+      {
+        "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/README.md",
+        "relative_path": "README.md",
+        "kind": "task_readme",
+        "chars": 9289,
+        "lines": 191
+      },
+      {
+        "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py",
+        "relative_path": "baseline.py",
+        "kind": "benchmark_support",
+        "chars": 5425,
+        "lines": 118
+      },
+      {
+        "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/evaluate.py",
+        "relative_path": "evaluate.py",
+        "kind": "benchmark_support",
+        "chars": 2615,
+        "lines": 62
+      },
+      {
+        "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/data.py",
+        "relative_path": "data.py",
+        "kind": "benchmark_support",
+        "chars": 2666,
+        "lines": 64
+      },
+      {
+        "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/ablation_features.py",
+        "relative_path": "ablation_features.py",
+        "kind": "benchmark_support",
+        "chars": 3791,
+        "lines": 78
+      },
+      {
+        "path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline_scores.json",
+        "relative_path": "baseline_scores.json",
+        "kind": "benchmark_support",
+        "chars": 2349,
+        "lines": 98
+      }
+    ],
+    "primary_readme_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/README.md",
+    "required_evaluation_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/evaluate.py",
+    "required_baseline_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py",
+    "required_data_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/data.py",
+    "required_feature_ablation_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/ablation_features.py",
+    "required_candidate_model_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_000/model.py",
+    "fully_read_paths": [
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/README.md",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/ablation_features.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/data.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/evaluate.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_000/model.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_001/model.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_002/model.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_003/model.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_004/model.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_005/model.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_006/model.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_007/model.py",
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_008/model.py"
+    ],
+    "read_coverage": {
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/README.md": [
+        [
+          0,
+          9289
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/ablation_features.py": [
+        [
+          0,
+          3791
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py": [
+        [
+          0,
+          5425
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/data.py": [
+        [
+          0,
+          2666
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/evaluate.py": [
+        [
+          0,
+          2615
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_000/model.py": [
+        [
+          0,
+          5947
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_001/model.py": [
+        [
+          0,
+          5947
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_002/model.py": [
+        [
+          0,
+          5947
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_003/model.py": [
+        [
+          0,
+          5947
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_004/model.py": [
+        [
+          0,
+          5947
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_005/model.py": [
+        [
+          0,
+          5488
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_006/model.py": [
+        [
+          0,
+          5488
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_007/model.py": [
+        [
+          0,
+          6792
+        ]
+      ],
+      "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_008/model.py": [
+        [
+          0,
+          8168
+        ]
+      ]
+    },
+    "data_inspected": true,
+    "environment_inspected": true,
+    "environment_inventory": {
+      "success": true,
+      "python_executable": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/.venv/bin/python",
+      "python_version": "3.13.13",
+      "platform": "macOS-26.6.2-arm64-i386-64bit-Mach-O",
+      "packages": {
+        "catboost": {
+          "installed": false,
+          "version": null
+        },
+        "imbalanced-learn": {
+          "installed": false,
+          "version": null
+        },
+        "lightgbm": {
+          "installed": false,
+          "version": null
+        },
+        "numpy": {
+          "installed": true,
+          "version": "2.5.2"
+        },
+        "optuna": {
+          "installed": false,
+          "version": null
+        },
+        "pandas": {
+          "installed": true,
+          "version": "3.0.5"
+        },
+        "polars": {
+          "installed": false,
+          "version": null
+        },
+        "pyarrow": {
+          "installed": false,
+          "version": null
+        },
+        "recbole": {
+          "installed": false,
+          "version": null
+        },
+        "scikit-learn": {
+          "installed": true,
+          "version": "1.9.0"
+        },
+        "scipy": {
+          "installed": true,
+          "version": "1.18.1"
+        },
+        "statsmodels": {
+          "installed": false,
+          "version": null
+        },
+        "torch": {
+          "installed": true,
+          "version": "2.13.0"
+        },
+        "torchaudio": {
+          "installed": false,
+          "version": null
+        },
+        "torchvision": {
+          "installed": false,
+          "version": null
+        },
+        "torchrec": {
+          "installed": false,
+          "version": null
+        },
+        "transformers": {
+          "installed": false,
+          "version": null
+        },
+        "xgboost": {
+          "installed": false,
+          "version": null
+        },
+        "tensorflow": {
+          "installed": false,
+          "version": null
+        }
+      },
+      "policy": "The hackathon permits open-source frameworks. Missing allowlisted ML packages auto-install as binary wheels in this run's dedicated venv; off-allowlist packages require explicit approval. Every resolution is logged and frozen.",
+      "environment_dir": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/.venv",
+      "auto_install_allowlist": [
+        "catboost",
+        "imbalanced-learn",
+        "lightgbm",
+        "numpy",
+        "optuna",
+        "pandas",
+        "polars",
+        "pyarrow",
+        "recbole",
+        "scikit-learn",
+        "scipy",
+        "statsmodels",
+        "torch",
+        "torchaudio",
+        "torchrec",
+        "torchvision",
+        "transformers",
+        "xgboost"
+      ],
+      "binary_only_installs": true
+    },
+    "literature_queries": [
+      "ranking loss BPR listwise softmax recommendation",
+      "user behaviour sequence modelling DIN SIM click-through rate",
+      "multi-task learning auxiliary objectives recommender",
+      "within-user recommendation sampled softmax listwise ranking loss hard negative nDCG implementation",
+      "recommendation train-only smoothed item target encoding Bayesian shrinkage ranking feature leakage control",
+      "Deep Cross Network DCN recommendation explicit feature crosses ranking CTR why improve FM",
+      "user behavior history positive interactions recency affinity features recommendation ranking DIN SIM implementation",
+      "multi task learning click through rate auxiliary click like profile recommender MMoE ranking implementation task weighting",
+      "recommender systems temporal context hour of day feature distribution shift ranking time aware recommendation",
+      "censored watch time recommendation duration normalized play progress multi task auxiliary ranking",
+      "recommender systems temporal context hour item interaction feature distribution shift ranking time aware recommendation"
+    ],
+    "baseline_reproduced": true,
+    "baseline_metrics": {
+      "GAUC": 0.6671326321610643,
+      "nDCG@5": 0.5358048805448538,
+      "primary": 0.601468756352959,
+      "users": 22377.0,
+      "rows": 124909.0
+    },
+    "baseline_execution": {
+      "success": true,
+      "metrics": {
+        "GAUC": 0.6671326321610643,
+        "nDCG@5": 0.5358048805448538,
+        "primary": 0.601468756352959,
+        "users": 22377.0,
+        "rows": 124909.0
+      },
+      "expected_metrics": {
+        "GAUC": 0.6674,
+        "nDCG@5": 0.5357,
+        "primary": 0.6016
+      },
+      "tolerance": 0.002,
+      "error": null,
+      "wall_seconds": 14.874451875686646,
+      "seed": 0,
+      "trial_config": {},
+      "execution_id": "08bbbc6585aa48bda51235412efe4234",
+      "source_sha256": "3098287eeaae98e05049f646c5a330659bb74823b45214e1af45dd71628aeab3",
+      "source_snapshot_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_000/.harness/executions/08bbbc6585aa48bda51235412efe4234/model.py",
+      "prediction_sha256": "1a3272e512d79db9878537ab0a02418c08ef1db8ca3d5df4cb2d93203fa28382",
+      "organizer_reference": {
+        "baseline_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py",
+        "baseline_sha256": "34d7bfc4b545a38a52dabf3084791e7c7dd6b911eca0e713fb707a6379156d27",
+        "scores_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline_scores.json",
+        "scores_sha256": "9a0c3575b31684dc8ef4d0762068796ff544b225f42d9bcaf8d53573082df1a5",
+        "config": {
+          "model": "FM",
+          "k": 16,
+          "lr": 0.001,
+          "batch": 8192,
+          "max_epochs": 40,
+          "patience": 4,
+          "fields": [
+            "user_id",
+            "video_id",
+            "author_id",
+            "tab",
+            "dur_bucket"
+          ]
+        },
+        "published_valid": {
+          "GAUC": 0.6674,
+          "nDCG@5": 0.5357,
+          "primary": 0.6016
+        },
+        "published_hidden_test": {
+          "GAUC": 0.661,
+          "nDCG@5": 0.5282,
+          "primary": 0.5946
+        },
+        "published_hidden_test_std_over_5_seeds": {
+          "test_GAUC": 0.0008,
+          "test_nDCG@5": 0.0008,
+          "test_primary": 0.0008
+        },
+        "comparison_split": "validation",
+        "hidden_test_was_not_scored": true
+      }
+    },
+    "task_context": {
+      "task_objective": "Within-user ranking of each user's logged evaluation impressions for long-view relevance; improve the fixed primary score, the mean of GAUC and nDCG@5.",
+      "target_label": "long_view, the native binary 0/1 relevance label.",
+      "metrics": [
+        "GAUC (within-user, only users with both classes, weighted by positive count)",
+        "nDCG@5 (within-user; all-negative users contribute 0 and all-positive users contribute 1)",
+        "primary = mean(GAUC, nDCG@5)"
+      ],
+      "data_splits": {
+        "train": "20220408–20220421",
+        "validation": "20220422–20220428",
+        "test": "20220429–20220508 (hidden and never accessed during research)"
+      },
+      "baseline": "Official NumPy five-field FM (user_id, video_id, author_id, tab, dur_bucket), pointwise logistic loss, k=16, lr=0.001, batch=8192, up to 40 epochs/patience 4. Reproduced validation primary=0.6014687564 (GAUC=0.6671326322, nDCG@5=0.5358048805), consistent with the official validation reference within the 0.002 tolerance.",
+      "evaluation_protocol": [
+        "Train only on the official train partition and evaluate only on the official validation partition.",
+        "Rank only impressions belonging to the same user in the evaluation set; no full-corpus retrieval.",
+        "Scores need only preserve relative order but must be finite and aligned one-per-validation-row in data.load() order.",
+        "GAUC uses discriminative users only and positive-count weighting; nDCG@5 retains zero-positive users with score zero.",
+        "Validation labels may be used for baseline-style early stopping but cannot enter features or prediction construction."
+      ],
+      "hard_constraints": [
+        "Never access test rows, dates, or labels during research.",
+        "Never modify official starter-kit files or evaluate.py.",
+        "Candidate-data CSVs are immutable; joins, encoders, histories, and transformations run self-contained from candidate model.py over --data_dir.",
+        "Fit all vocabularies, bins, aggregates, histories, and target-derived statistics using train rows only; provide unknown defaults for cold items/users.",
+        "Preserve the prediction/submission helpers and candidate CLI contract; preserve row order because user-item pairs repeat.",
+        "Use fixed seeds for every stochastic source and make substantive model.py changes for each experiment.",
+        "Convergence/noise threshold is 0.002 primary."
+      ],
+      "known_dead_ends": [
+        "Organizer feature ablation: adding the organizer's 13 static CWM feature fields did not improve the baseline (primary 0.5940 versus 0.5950 with five fields); do not retry all 13 static fields as a standalone experiment.",
+        "Organizer capacity ablation: embedding dimension k=8/16/32 was effectively flat around 0.589; capacity alone is not the demonstrated bottleneck.",
+        "Purely user-side first-order features contribute zero to within-user ranking because they are constant within a user's candidate set.",
+        "Prior corrected same-user one-negative BPR/schedule improved only +0.000690 primary, below threshold; do not repeat that exact sampler and schedule.",
+        "Prior causal exposure-only DIN was a valid negative (0.596819 versus 0.604062 feature-FM parent); do not repeat that exposure-only sequence construction.",
+        "Prior leave-one-out target-rate/time FM reconstruction was negative; do not repeat that exact construction.",
+        "Original BPR implementation was broken by negative-negative pairing and is not evidence against BPR generally; never use a pair builder without positive/negative/distinct-row assertions."
+      ],
+      "promising_directions": [
+        "Ranking-aligned loss materially different from prior simple BPR, such as listwise sampled softmax, hard-negative, or top-weighted pair loss.",
+        "Leakage-safe positive-behavior histories, recency/affinity summaries, or SIM-style retrieval rather than exposure-only DIN.",
+        "Controlled extension or isolation of the prior improved train-only rate/context feature bundle, whose effects were confounded.",
+        "Multi-task long_view prediction with click/like/profile-entry auxiliary heads, extending rather than exactly rerunning the prior MMoE frontier.",
+        "Censored watch-time/progress modelling using only train-observed signals and robust candidate-varying transforms.",
+        "Time/context and temporal-shift features fitted on train only, with explicit validation-safe defaults.",
+        "A faithful PyTorch DeepFM/DCN/xDeepFM replacement if representation interactions are justified beyond embedding dimension alone."
+      ],
+      "feature_engineering_context": {
+        "baseline_fields": [
+          "user_id",
+          "video_id",
+          "author_id",
+          "tab",
+          "dur_bucket"
+        ],
+        "measured_dead_ends": [
+          "Organizer result: adding all 13 static CWM feature fields did not improve the five-field baseline (primary 0.5940 versus 0.5950).",
+          "Embedding dimension k=8/16/32 stayed flat around 0.589, so capacity alone is not the bottleneck.",
+          "Purely user-side first-order features cannot affect within-user ranking.",
+          "The exact prior leave-one-out rate/time reconstruction and exposure-only DIN are valid negative implementations."
+        ],
+        "promising_feature_families": [
+          "Train-only smoothed item/user long_view rate or count/context buckets, preferably controlled to isolate the previously confounded positive bundle.",
+          "Candidate-varying temporal context (hour/date or train-derived temporal reliability) robust to the observed label shift.",
+          "Positive behavioral history affinity/recency and candidate-to-history matching, with no future interactions.",
+          "Train-only watch-time/progress summaries and censored-watch-time targets.",
+          "Candidate-varying interactions of user state with item/context, rather than pure user-only terms."
+        ],
+        "leakage_controls": [
+          "All categorical vocabularies, bucket edges, rate/count aggregates, and target-derived statistics are fitted on train rows only.",
+          "For validation scoring, map unseen users/items/categories to explicit train-derived unknown/prior defaults; EDA reports 17 unseen-item validation rows and 1.59% unseen-user rows.",
+          "Construct histories causally from prior train interactions only (or prefixes that exclude the scored event and any validation labels); do not use validation outcome columns.",
+          "Do not aggregate validation labels, use validation rows to fit transformations, or key predictions by repeated user-item pairs; write in loader row order."
+        ],
+        "implementation_boundary": "Feature code runs self-contained from candidate model.py over immutable candidate_data inputs (or hashed local candidate helpers), retaining the inherited prediction writers and CLI contract."
+      },
+      "candidate_contract": [
+        "Accept exactly --data_dir, --seed, --prediction-path with optional --trial-config, or --submission-path for finalization.",
+        "Declare accepted trial-config keys and reject unknown keys.",
+        "Write row_id,user_id,video_id,score with contiguous zero-based row_id and one finite validation score per data.load() validation row.",
+        "Seed NumPy, PyTorch/random if used, and any sampler; restore the best validation checkpoint if early stopping.",
+        "Keep write_validation_predictions and write_hidden_submission inside model.py; research runs only use --prediction-path."
+      ],
+      "source_paths": [
+        "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/README.md",
+        "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/baseline.py",
+        "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/evaluate.py",
+        "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/data.py",
+        "/Users/sabithajayakumar/TikTokTechJam_STierCo/baseline_kuairand-starter-kit/ablation_features.py",
+        "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_000/model.py"
+      ]
+    },
+    "research_backlog": [
+      {
+        "hypothesis": "A controlled extension of the prior pointwise-BCE MMoE frontier that adds one train-only candidate-varying rate/context family at a time (starting with smoothed item long_view-rate buckets plus calendar context) can identify and retain the useful portion of the previously confounded 0.604062 feature gain while keeping auxiliary heads fixed.",
+        "target_component": "features",
+        "evidence_id": "prior-run:20260831_134234",
+        "expected_primary_delta": 0.0025,
+        "estimated_cost": "normal; deterministic train-only aggregate construction plus bounded PyTorch training",
+        "falsification_criterion": "Primary fails to exceed its matched MMoE/five-field control by 0.0020, or an ablation shows no candidate-varying feature family accounts for the earlier gain."
+      },
+      {
+        "hypothesis": "A listwise within-user sampled-softmax or top-weighted pair loss, with explicit eligible-user grouping and hard negatives, will align training more closely to GAUC/nDCG@5 than pointwise BCE and avoid the prior simple one-negative BPR limitation.",
+        "target_component": "loss",
+        "evidence_id": "prior-run:20260831_161310",
+        "expected_primary_delta": 0.003,
+        "estimated_cost": "substantial; custom grouped PyTorch batches, assertions, and early stopping",
+        "falsification_criterion": "A valid implementation with positive/negative/group assertions does not improve primary by at least 0.0020 over the same-feature pointwise control."
+      },
+      {
+        "hypothesis": "Compact train-only positive-behavior affinity and recency summaries (clicked/long-viewed author, video, and tag affinities) will outperform the prior exposure-only DIN because they encode preference signal rather than undifferentiated exposure.",
+        "target_component": "sequence",
+        "evidence_id": "prior-run:20260831_134234",
+        "expected_primary_delta": 0.003,
+        "estimated_cost": "substantial; causal history build and PyTorch/FM integration",
+        "falsification_criterion": "The leakage-safe positive-history representation is valid but is at least 0.0020 below or no better than its matched non-history feature control."
+      },
+      {
+        "hypothesis": "An MMoE extension with calibrated auxiliary weighting or an additional watch-progress-related auxiliary target will transfer abundant click signal without allowing auxiliary labels into validation features, improving the long_view head beyond the prior near-frontier MMoE.",
+        "target_component": "auxiliary-task",
+        "evidence_id": "prior-run:20260831_161310",
+        "expected_primary_delta": 0.0025,
+        "estimated_cost": "substantial; seeded multi-head PyTorch with long_view-only validation ranking",
+        "falsification_criterion": "Best-checkpoint long_view primary does not exceed the existing MMoE result by 0.0020 under a changed auxiliary weighting/task construction."
+      },
+      {
+        "hypothesis": "Train-only censored watch-time/progress modelling using duration-normalized play-time bins and an auxiliary regression/classification head will supply graded engagement information that binary long_view omits.",
+        "target_component": "auxiliary-task",
+        "evidence_id": "eda:label-shift",
+        "expected_primary_delta": 0.003,
+        "estimated_cost": "substantial; robust censor-aware target transforms and multi-task training",
+        "falsification_criterion": "After excluding all validation outcomes from feature fitting, the watch-time auxiliary model does not beat an otherwise identical long_view-only model by 0.0020."
+      },
+      {
+        "hypothesis": "A DCN/DeepFM with explicit candidate-varying train-only aggregate/context fields can learn higher-order crosses that the linear-plus-pairwise NumPy FM misses; this is a representation change, not an embedding-dimension-only retry.",
+        "target_component": "model",
+        "evidence_id": "prior-run:20260831_134234",
+        "expected_primary_delta": 0.003,
+        "estimated_cost": "substantial; seeded PyTorch model, bounded epochs, and checkpoint restoration",
+        "falsification_criterion": "The faithful neural interaction model fails to improve primary by 0.0020 versus the matched FM feature/control model, despite stable learning and early stopping."
+      },
+      {
+        "hypothesis": "Train-fitted temporal reliability and hour/day-context interactions can mitigate the observed train-to-validation long_view-rate shift (0.3366 to 0.3133) and tab-distribution drift while remaining candidate-varying within a user session.",
+        "target_component": "features",
+        "evidence_id": "eda:label-shift",
+        "expected_primary_delta": 0.0025,
+        "estimated_cost": "normal; train-only time bucketing/aggregate pipeline and controlled ablation",
+        "falsification_criterion": "Temporal/context features do not improve primary by 0.0020 over a matched train-only rate/context control or degrade both GAUC and nDCG@5."
+      },
+      {
+        "hypothesis": "A deployment-robust evaluation/training selection scheme that validates epoch selection on the fixed official primary with deterministic seed controls and explicitly handles unseen-item/user defaults will reduce overfit from temporal drift and stabilize an otherwise promising model.",
+        "target_component": "evaluation",
+        "evidence_id": "eda:item-cold-start",
+        "expected_primary_delta": 0.002,
+        "estimated_cost": "normal; checkpoint and cold-start-path audit around a matched candidate",
+        "falsification_criterion": "Deterministic checkpoint restoration and explicit unknown paths do not improve or stabilize primary relative to the same model's existing selection protocol."
+      }
+    ],
+    "backlog_reject_count": 0,
+    "scored_experiments": [
+      {
+        "iteration": 1,
+        "target_component": "loss"
+      },
+      {
+        "iteration": 2,
+        "target_component": "features"
+      },
+      {
+        "iteration": 3,
+        "target_component": "model"
+      },
+      {
+        "iteration": 4,
+        "target_component": "sequence"
+      },
+      {
+        "iteration": 5,
+        "target_component": "auxiliary-task"
+      },
+      {
+        "iteration": 6,
+        "target_component": "features"
+      },
+      {
+        "iteration": 7,
+        "target_component": "auxiliary-task"
+      },
+      {
+        "iteration": 8,
+        "target_component": "features"
+      }
+    ],
+    "rejected_actions": [
+      {
+        "action": "record_task_context",
+        "error": "TASK_CONTEXT_INVALID",
+        "invalid_or_empty_fields": [],
+        "feature_context_errors": [
+          "measured_dead_ends must record that the organizer's 13 static fields did not improve the baseline"
+        ],
+        "source_errors": [],
+        "required_sources_not_cited": [],
+        "cited_sources_not_fully_read": []
+      }
+    ],
+    "successful_candidate_fingerprints": 8
+  },
+  "data_view_manifest": {
+    "source_logs": [
+      "log_standard_4_08_to_4_21_pure.csv",
+      "log_standard_4_22_to_5_08_pure.csv"
+    ],
+    "date_splits": {
+      "train": [
+        20220408,
+        20220421
+      ],
+      "valid": [
+        20220422,
+        20220428
+      ],
+      "test_excluded": [
+        20220429,
+        20220508
+      ]
+    },
+    "verified_source_counts": {
+      "train": 1141112,
+      "valid": 124909,
+      "test": 170588,
+      "outside": 0
+    },
+    "emitted_candidate_counts": {
+      "train": 1141112,
+      "valid": 124909,
+      "test": 0
+    },
+    "excluded_files": [
+      "log_random_4_22_to_5_08_pure.csv"
+    ],
+    "policy": "candidate processes receive train and validation rows only"
+  },
+  "python_environment": {
+    "success": true,
+    "environment_manifest": "/Users/sabithajayakumar/TikTokTechJam_STierCo/artifacts/runs/20260901_012832/environment/manifest.json",
+    "phase": "run_complete",
+    "timestamp": "2026-09-01T01:49:28.703036Z",
+    "requirements_lock": "/Users/sabithajayakumar/TikTokTechJam_STierCo/artifacts/runs/20260901_012832/environment/requirements.lock.txt",
+    "requirements_lock_sha256": "1700ed43492685cd888daa077612302db2177aecd216c31be9cc1930862507eb",
+    "resolved_distribution_count": 105,
+    "python_executable": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/.venv/bin/python",
+    "environment_dir": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/.venv"
+  }
+}

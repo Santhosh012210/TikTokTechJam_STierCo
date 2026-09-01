@@ -59,6 +59,9 @@ class Config:
     BASELINE_PRIMARY:     float = 0.6016
     BASELINE_GAUC:        float = 0.6674
     BASELINE_NDCG:        float = 0.5357
+    BASELINE_TEST_PRIMARY: float = 0.5946
+    BASELINE_TEST_GAUC:    float = 0.6610
+    BASELINE_TEST_NDCG:    float = 0.5282
     ORACLE_PRIMARY:       float = 0.8484
     # Reference rungs from the starter kit, used to tell an idea that lost from an
     # implementation that never worked. A candidate with the baseline's features
@@ -66,6 +69,8 @@ class Config:
     # refuted hypothesis.
     POPULARITY_PRIMARY:   float = 0.5807
     RANDOM_PRIMARY:       float = 0.4834
+    POPULARITY_TEST_PRIMARY: float = 0.5715
+    RANDOM_TEST_PRIMARY:     float = 0.4753
     HEADROOM:             float = 0.2468
     CONVERGENCE_EPSILON:  float = 0.002
     CONVERGENCE_N:        int   = 3
@@ -79,13 +84,9 @@ class Config:
     STRATEGIST_EVERY_N:       int   = 8
 
     # Conservative provider-agnostic request and read limits.
-    # On Gemini thinking models max_output_tokens covers thinking tokens too, so a
-    # small cap is spent reasoning and the model never emits a tool call. Give the
-    # answer real room and bound thinking separately.
+    # On thinking models max_output_tokens covers thinking tokens too, so a small
+    # cap can be spent before the model emits a tool call.
     AGENT_MAX_OUTPUT_TOKENS:      int   = int(os.environ.get("AGENT_MAX_OUTPUT_TOKENS", "8192"))
-    AGENT_THINKING_BUDGET_TOKENS: int   = int(
-        os.environ.get("AGENT_THINKING_BUDGET_TOKENS", "2048")
-    )
     AGENT_REFLECTION_MAX_TOKENS:  int   = int(os.environ.get("AGENT_REFLECTION_MAX_TOKENS", "768"))
     AGENT_READ_MAX_CHARS:         int   = int(os.environ.get("AGENT_READ_MAX_CHARS", "6000"))
     AGENT_BOOTSTRAP_MAX_TURNS:    int   = int(
@@ -127,7 +128,7 @@ class Config:
     PROVIDER_RETRY_DELAY_S:       float = float(os.environ.get("PROVIDER_RETRY_DELAY_S", "1"))
     RATE_LIMIT_RETRY_DELAY_S:     float = float(os.environ.get("RATE_LIMIT_RETRY_DELAY_S", "60"))
 
-    SEED:    int   = 42
+    SEED:    int   = 0
     UCB_C:   float = 1.414
     PYTHON_EXE: str = sys.executable
     BASE_PYTHON_EXE: str | None = None
@@ -176,7 +177,21 @@ class Config:
     AGENT_CANDIDATE_ARCHIVE_LIMIT: int = int(
         os.environ.get("AGENT_CANDIDATE_ARCHIVE_LIMIT", "3")
     )
-    AGENT_STABILITY_SEEDS: tuple[int, ...] = (42, 314, 2718)
+    # Match the organizer's published five-seed panel exactly.
+    AGENT_STABILITY_SEEDS: tuple[int, ...] = (0, 1, 2, 3, 4)
+    # Research-frontier policy. The first four trials branch from the reproduced
+    # baseline across independent components; later trials select among the
+    # strongest few frozen nodes with a noise-scaled UCB bonus.
+    AGENT_FRONTIER_BRANCH_TRIALS: int = int(
+        os.environ.get("AGENT_FRONTIER_BRANCH_TRIALS", "4")
+    )
+    AGENT_FRONTIER_TOP_K: int = int(os.environ.get("AGENT_FRONTIER_TOP_K", "3"))
+    AGENT_FRONTIER_BRANCH_COMPONENTS: tuple[str, ...] = (
+        "loss", "features", "model", "sequence"
+    )
+    AGENT_MIN_EXPERIMENTS_BEFORE_CONVERGENCE: int = int(
+        os.environ.get("AGENT_MIN_EXPERIMENTS_BEFORE_CONVERGENCE", "8")
+    )
 
 def load_config() -> Config:
     cfg = Config()
@@ -201,6 +216,15 @@ def load_config() -> Config:
         cfg.BASELINE_PRIMARY = fm.get("valid", {}).get("primary", cfg.BASELINE_PRIMARY)
         cfg.BASELINE_GAUC    = fm.get("valid", {}).get("GAUC",    cfg.BASELINE_GAUC)
         cfg.BASELINE_NDCG    = fm.get("valid", {}).get("nDCG@5",  cfg.BASELINE_NDCG)
+        cfg.BASELINE_TEST_PRIMARY = fm.get("test", {}).get(
+            "primary", cfg.BASELINE_TEST_PRIMARY
+        )
+        cfg.BASELINE_TEST_GAUC = fm.get("test", {}).get(
+            "GAUC", cfg.BASELINE_TEST_GAUC
+        )
+        cfg.BASELINE_TEST_NDCG = fm.get("test", {}).get(
+            "nDCG@5", cfg.BASELINE_TEST_NDCG
+        )
         cfg.ORACLE_PRIMARY   = oracle.get("valid", {}).get("primary", cfg.ORACLE_PRIMARY)
         popularity = scores.get("item_popularity", {})
         random_rung = scores.get("random", {})
@@ -209,6 +233,12 @@ def load_config() -> Config:
         )
         cfg.RANDOM_PRIMARY = random_rung.get("valid", {}).get(
             "primary", cfg.RANDOM_PRIMARY
+        )
+        cfg.POPULARITY_TEST_PRIMARY = popularity.get("test", {}).get(
+            "primary", cfg.POPULARITY_TEST_PRIMARY
+        )
+        cfg.RANDOM_TEST_PRIMARY = random_rung.get("test", {}).get(
+            "primary", cfg.RANDOM_TEST_PRIMARY
         )
         cfg.HEADROOM         = cfg.ORACLE_PRIMARY - cfg.BASELINE_PRIMARY
         cfg.CONVERGENCE_EPSILON = float(conv.get("epsilon", cfg.CONVERGENCE_EPSILON))

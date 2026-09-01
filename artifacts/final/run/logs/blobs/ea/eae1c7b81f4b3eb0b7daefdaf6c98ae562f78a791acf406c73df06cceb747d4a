@@ -1,0 +1,74 @@
+{
+  "hypothesis": "A single OOF-smoothed train-item long_view-rate bucket appended to the five-field pointwise FM will improve within-user ranking by supplying a candidate-varying historical-quality signal while avoiding each training row's own-label leakage.",
+  "reasoning": "The prior rate/context FM bundle exceeded threshold but was confounded, while the exact leave-one-out/time reconstruction was negative. This controlled extension isolates only item quality with a different, user-fold out-of-fold construction. target-encoding#what-it-is supports smoothed rate estimation, and target-encoding#why-it-helps-a-ranking-metric specifically notes item-side encodings can reorder within-user lists unlike user-side rates.",
+  "literature_chunk_ids": [
+    "target-encoding#what-it-is",
+    "target-encoding#why-it-helps-a-ranking-metric",
+    "target-encoding#when-it-will-not-help"
+  ],
+  "proposal": {
+    "target_component": "features",
+    "expected_effect": "Expected +0.0025 primary versus 0.601469, principally by better ordering candidate videos with different historical long-view quality.",
+    "falsification_criterion": "The valid OOF item-rate feature fails to improve primary by at least 0.0020 over 0.601469, or degrades both GAUC and nDCG@5.",
+    "rollback_plan": "Retain the five-field pointwise FM incumbent; do not infer that the prior full rate/context bundle was invalid, only that isolated OOF item rate is insufficient.",
+    "feature_sources": [
+      "training interaction video_id and long_view; validation video_id only"
+    ],
+    "feature_transformations": [
+      "Deterministic user-ID five-fold out-of-fold smoothed item long_view rate for training; frozen all-train smoothed item rate for validation; train-rate quantile discretization into 16 categorical FM buckets."
+    ],
+    "leakage_controls": [
+      "Every rate statistic and bin edge is fitted exclusively on training interactions.",
+      "Each training row uses an item rate estimated from the other four user folds, excluding its own user fold and label.",
+      "Validation mapping uses only all-train item counts/labels; unseen validation items receive the global-prior-smoothed default, and validation outcomes never enter features."
+    ]
+  },
+  "success": true,
+  "metrics": {
+    "GAUC": 0.6656296859400509,
+    "nDCG@5": 0.535390197108974,
+    "primary": 0.6005099415245124,
+    "users": 22377.0,
+    "rows": 124909.0
+  },
+  "error": null,
+  "wall_seconds": 14.716570854187012,
+  "candidate_changed": true,
+  "candidate_fingerprint": "cc6ede53ac2202e01fa89bbbe2eb61a8bea6edb094478bebe05741953802965d",
+  "seed": 0,
+  "trial_config": {
+    "epochs": 40,
+    "rate_smoothing": 50.0,
+    "rate_bins": 16
+  },
+  "sanity_check": null,
+  "change_summary": {
+    "hunks": 3,
+    "lines_added": 34,
+    "lines_removed": 2,
+    "parent_lines": 146,
+    "is_rewrite": false
+  },
+  "prediction_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_002/.harness/validation_predictions_427cf7f72d53441d9e0823730e71e813_seed_0.csv",
+  "prediction_sha256": "5b8ebf1d8b8716d015ff78e2d65f2b32587de8d16f457ecf9e4d6da590515277",
+  "execution_id": "427cf7f72d53441d9e0823730e71e813",
+  "source_sha256": "6e8a5348e4dbaf4ebfc63cb7872dc3c080622f27de935fb7637b34982a484aec",
+  "source_snapshot_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_002/.harness/executions/427cf7f72d53441d9e0823730e71e813/model.py",
+  "resource_usage": {
+    "cpu_user_seconds": 14.083763000000005,
+    "cpu_system_seconds": 0.20418099999999972,
+    "peak_rss_platform_units": 768458752,
+    "timeout_seconds": 600,
+    "accelerator": "not_measured"
+  },
+  "execution_class": "normal",
+  "execution_grant": {
+    "granted": true,
+    "requested_class": "normal",
+    "granted_class": "normal",
+    "timeout_seconds": 600,
+    "remaining_wall_seconds": 21001.4,
+    "reason": "requested class 'normal' granted at 600s"
+  },
+  "execution_attempted": true
+}

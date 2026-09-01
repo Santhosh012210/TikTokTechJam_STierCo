@@ -1,0 +1,30 @@
+{
+  "query": "Deep Cross Network DCN recommendation explicit feature crosses ranking CTR why improve FM",
+  "results": [
+    {
+      "chunk_id": "dcn#what-it-is",
+      "method": "dcn",
+      "title": "DCN and DCN-V2: Deep and Cross Network",
+      "section": "What it is",
+      "score": 21.2601,
+      "text": "A network with an explicit cross layer that computes bounded-degree feature interactions\nin a structured way. Each cross layer applies:\n\n    x_{l+1} = x_0 * (w_l^T x_l) + b_l + x_l          # DCN\n    x_{l+1} = x_0 * (W_l x_l + b_l) + x_l            # DCN-V2, W is a matrix\n\nAfter `l` layers the output contains interactions up to degree `l+1`. DCN-V2 replaces the\nvector `w` with a matrix `W`, greatly increasing expressiveness; it is the version worth\nimplementing."
+    },
+    {
+      "chunk_id": "dcn#when-it-will-not-help",
+      "method": "dcn",
+      "title": "DCN and DCN-V2: Deep and Cross Network",
+      "section": "When it will not help",
+      "score": 20.6098,
+      "text": "Same conditions as DeepFM, and the same evidence check applies: if capacity ablations\nshow a flat metric across embedding dimensions, added interaction capacity is not the\nbinding constraint.\n\nAdditionally, on a feature set of a few high-cardinality ID fields, the useful interaction\nis mostly the `user x item` cross that FM already models directly. Explicit higher-order\ncrossing has less to find than it does on the wide, many-field ad datasets these papers\nwere evaluated on."
+    },
+    {
+      "chunk_id": "dcn#why-it-helps-a-ranking-metric",
+      "method": "dcn",
+      "title": "DCN and DCN-V2: Deep and Cross Network",
+      "section": "Why it helps a ranking metric",
+      "score": 17.6469,
+      "text": "Compared to DeepFM's MLP branch, the cross network learns interactions of *known,\nbounded degree* rather than hoping an MLP discovers them. It is more parameter-efficient\nthan an MLP at the same interaction order, and in the DCN-V2 paper's comparisons it\noutperformed MLP-based alternatives on several CTR benchmarks.\n\nThe same scepticism as DeepFM applies: this is an argument that higher-order interaction\nis the bottleneck, which is an empirical claim about a specific dataset."
+    }
+  ],
+  "bootstrap_counted": true
+}

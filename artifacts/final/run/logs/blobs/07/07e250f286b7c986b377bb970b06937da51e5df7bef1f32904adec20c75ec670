@@ -1,0 +1,84 @@
+{
+  "hypothesis": "A train-only censored, duration-normalized watch-progress auxiliary head on the hour-context DCN will improve long_view ranking by learning graded engagement while avoiding duration bias and treating completed plays as lower-bounded observations.",
+  "reasoning": "The train log contains play_time_ms and duration_ms, while long_view is binary and likely inherits duration-related censoring. Censored regression explicitly avoids penalizing predictions above a completed video's duration (censored-regression#what-it-is), and duration-normalized progress prevents raw watch time from simply rewarding long videos (censored-regression#why-it-helps-a-ranking-metric). This is distinct from experiment 5's click/like/profile multi-task supervision and retains the slightly improved hour-context DCN parent.",
+  "literature_chunk_ids": [
+    "censored-regression#what-it-is",
+    "censored-regression#how-to-implement",
+    "censored-regression#why-it-helps-a-ranking-metric"
+  ],
+  "proposal": {
+    "target_component": "auxiliary-task",
+    "expected_effect": "Expected +0.003 primary over 0.604097 if graded censored engagement improves shared candidate representations beyond binary long_view supervision.",
+    "falsification_criterion": "A valid train-only progress auxiliary run does not improve primary by at least 0.0020 over 0.604097, or degrades both GAUC and nDCG@5.",
+    "rollback_plan": "Retain the hour-context DCN incumbent. If unsupported, do not reuse this exact one-sided normalized-progress head/weight; prefer a distinct duration-bucket percentile target or non-auxiliary temporal aggregate.",
+    "feature_sources": [
+      "Immutable training interaction columns play_time_ms and duration_ms, used only as auxiliary supervision.",
+      "Inherited five encoded fields plus the frozen train-vocabulary hour-of-day context field."
+    ],
+    "feature_transformations": [
+      "Compute training normalized progress min(play_time_ms / max(duration_ms,1), 1).",
+      "For completed plays (play_time_ms >= duration_ms), apply one-sided squared error only when predicted progress is below 1; otherwise use squared error for incomplete normalized plays.",
+      "Add one scalar progress head to the shared DCN representation; validation score uses only the original long_view head."
+    ],
+    "leakage_controls": [
+      "Read play time and duration only from 20220408–20220421 training rows, with row-count alignment assertion against the loader's train target.",
+      "No validation play time, duration, auxiliary target, or label is read into training, feature construction, or validation scores.",
+      "Hour vocabulary and all base encodings remain frozen from training; validation labels serve only official early-stopping evaluation and test is never accessed."
+    ]
+  },
+  "success": true,
+  "metrics": {
+    "GAUC": 0.670337436487095,
+    "nDCG@5": 0.5375775629277239,
+    "primary": 0.6039574997074094,
+    "users": 22377.0,
+    "rows": 124909.0
+  },
+  "error": null,
+  "wall_seconds": 16.684621810913086,
+  "candidate_changed": true,
+  "candidate_fingerprint": "d4a4479a2bccac9dfba18eb826f34a6156e0f281e9514fe71f2729f01c2f9a2e",
+  "seed": 0,
+  "trial_config": {
+    "embed_dim": 16,
+    "cross_layers": 2,
+    "hidden": 96,
+    "lr": 0.001,
+    "weight_decay": 1e-06,
+    "epochs": 20,
+    "batch_size": 4096,
+    "patience": 4,
+    "progress_weight": 0.08
+  },
+  "sanity_check": null,
+  "change_summary": {
+    "hunks": 9,
+    "lines_added": 29,
+    "lines_removed": 4,
+    "parent_lines": 130,
+    "is_rewrite": false,
+    "attribution_warning": "This experiment changed 9 separate regions. A score move cannot be attributed to any single one. State in the reflection which regions the conclusion actually rests on."
+  },
+  "prediction_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_007/.harness/validation_predictions_01eccaccc13b4bff861d2f0b3b20889f_seed_0.csv",
+  "prediction_sha256": "9703ac95955d6cb5027b22df005a3d287b9810a36ce7529f16e98e7038da7533",
+  "execution_id": "01eccaccc13b4bff861d2f0b3b20889f",
+  "source_sha256": "a5c0006faf364ba138337dee22e092c8ecd3ef12fa63bb276622b589c4b54ed7",
+  "source_snapshot_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_007/.harness/executions/01eccaccc13b4bff861d2f0b3b20889f/model.py",
+  "resource_usage": {
+    "cpu_user_seconds": 15.922790999999961,
+    "cpu_system_seconds": 0.809880999999999,
+    "peak_rss_platform_units": 1051869184,
+    "timeout_seconds": 1800,
+    "accelerator": "not_measured"
+  },
+  "execution_class": "substantial",
+  "execution_grant": {
+    "granted": true,
+    "requested_class": "substantial",
+    "granted_class": "substantial",
+    "timeout_seconds": 1800,
+    "remaining_wall_seconds": 20307.8,
+    "reason": "requested class 'substantial' granted at 1800s"
+  },
+  "execution_attempted": true
+}

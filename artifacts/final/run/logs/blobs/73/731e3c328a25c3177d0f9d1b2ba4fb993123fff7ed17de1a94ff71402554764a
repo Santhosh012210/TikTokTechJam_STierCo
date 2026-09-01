@@ -1,0 +1,82 @@
+{
+  "hypothesis": "Appending an out-of-fold-smoothed train-only video×hour long_view-rate bucket to the hour-context DCN will improve within-user ranking by representing candidate-specific temporal reliability beyond raw hour alone.",
+  "reasoning": "Raw hour on DCN had a small positive directional result (0.604097) amid documented label and tab distribution shift. The video×hour rate is candidate-varying and lets DCN learn user/tab/duration interactions with time-specific item reliability, whereas pure user features cannot change within-user order (within-user-ranking#why-it-helps-a-ranking-metric). This controlled extension differs from the failed single global item-rate FM feature by using temporal interaction and from the prior confounded rate/context bundle by isolating one rate family.",
+  "literature_chunk_ids": [
+    "within-user-ranking#why-it-helps-a-ranking-metric"
+  ],
+  "proposal": {
+    "target_component": "features",
+    "expected_effect": "Expected +0.0025 primary over the best hour-context DCN score of 0.604097 if train temporal reliability is stable enough to transfer to validation.",
+    "falsification_criterion": "Valid OOF/full-train video-hour rate buckets fail to improve primary by 0.0020 over 0.604097, or degrade both GAUC and nDCG@5.",
+    "rollback_plan": "Retain the best hour-context DCN at 0.604097. If unsupported, do not repeat this exact 5-fold, smoothing-30, eight-bin video-hour target encoding; consider a distinct train-fitted author-hour reliability or non-target temporal context.",
+    "feature_sources": [
+      "Immutable training log columns video_id, hourmin, date, and long_view.",
+      "Validation log video_id/hourmin only for applying the frozen transform.",
+      "Inherited five categorical fields and train-vocabulary hour field."
+    ],
+    "feature_transformations": [
+      "Create video_id×hour keys; compute five deterministic OOF smoothed train long_view rates for training rows with smoothing 30 toward the train global prior.",
+      "Quantize OOF rates into eight categorical bins for training.",
+      "Compute validation bins from full-train video-hour counts/rates only, with global-prior smoothing fallback for unseen combinations; append the one field to DCN inputs."
+    ],
+    "leakage_controls": [
+      "Fold assignment is deterministic from row index and seed; each training row's bin excludes that row's fold labels.",
+      "Validation long_view is never read by the rate builder; validation keys are transformed solely against full-train counts and labels.",
+      "All raw-file scans filter official train/validation dates, verify alignment to data.load ordering, retain unknown defaults, and do not access test."
+    ]
+  },
+  "success": true,
+  "metrics": {
+    "GAUC": 0.6690874410170902,
+    "nDCG@5": 0.5368998909264674,
+    "primary": 0.6029936659717787,
+    "users": 22377.0,
+    "rows": 124909.0
+  },
+  "error": null,
+  "wall_seconds": 20.828094959259033,
+  "candidate_changed": true,
+  "candidate_fingerprint": "556ba558b96682603cf459f02f7a077eccd15fd034a7329b924318c726415c36",
+  "seed": 0,
+  "trial_config": {
+    "embed_dim": 16,
+    "cross_layers": 2,
+    "hidden": 96,
+    "lr": 0.001,
+    "weight_decay": 1e-06,
+    "epochs": 20,
+    "batch_size": 4096,
+    "patience": 4,
+    "progress_weight": 0.08
+  },
+  "sanity_check": null,
+  "change_summary": {
+    "hunks": 2,
+    "lines_added": 34,
+    "lines_removed": 0,
+    "parent_lines": 155,
+    "is_rewrite": false
+  },
+  "prediction_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_008/.harness/validation_predictions_263931e953dc496992ef3a7c4dee94ae_seed_0.csv",
+  "prediction_sha256": "3058b12641813dd8c71d7f075e3eb16d2397fd6bde188ad6b9e969acfe7c7878",
+  "execution_id": "263931e953dc496992ef3a7c4dee94ae",
+  "source_sha256": "566e1c3256e14ad9522f400454370d3fb16a3481a328b4c95c546a3dc0f1d8e6",
+  "source_snapshot_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_008/.harness/executions/263931e953dc496992ef3a7c4dee94ae/model.py",
+  "resource_usage": {
+    "cpu_user_seconds": 19.97592599999996,
+    "cpu_system_seconds": 0.9364190000000008,
+    "peak_rss_platform_units": 1142095872,
+    "timeout_seconds": 1800,
+    "accelerator": "not_measured"
+  },
+  "execution_class": "substantial",
+  "execution_grant": {
+    "granted": true,
+    "requested_class": "substantial",
+    "granted_class": "substantial",
+    "timeout_seconds": 1800,
+    "remaining_wall_seconds": 20156.0,
+    "reason": "requested class 'substantial' granted at 1800s"
+  },
+  "execution_attempted": true
+}

@@ -1,0 +1,498 @@
+{
+  "policy": "train and validation dates only; hidden test excluded",
+  "artifact_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/research/eda.json",
+  "artifact_note": "This is a digest. The complete EDA report is the artifact above; use query_data for any specific aggregate it does not answer.",
+  "train": {
+    "rows": 1141112,
+    "users": 26210,
+    "items": 7538,
+    "target_positive_rate": 0.33662,
+    "auxiliary_positive_rates": {
+      "is_click": 0.463447,
+      "is_like": 0.018677,
+      "is_follow": 0.001007,
+      "is_comment": 0.002568,
+      "is_forward": 0.000996,
+      "is_hate": 0.000421,
+      "is_profile_enter": 0.025391
+    },
+    "numeric_quantiles": {
+      "duration_ms": {
+        "min": 0.0,
+        "p50": 69708.0,
+        "p90": 235766.0,
+        "p99": 424866.0,
+        "max": 1177720.0
+      },
+      "play_time_ms": {
+        "min": 0.0,
+        "p50": 4612.0,
+        "p90": 68242.0,
+        "p99": 212024.0,
+        "max": 809887.0
+      },
+      "profile_stay_time": {
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "max": 248474.0
+      },
+      "comment_stay_time": {
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 14721.0,
+        "max": 300000.0
+      }
+    },
+    "impressions_per_user": {
+      "min": 1.0,
+      "p50": 31.0,
+      "p90": 97.0,
+      "p99": 207.0,
+      "max": 809.0
+    },
+    "impressions_per_item": {
+      "min": 1.0,
+      "p50": 44.0,
+      "p90": 369.0,
+      "p99": 1592.0,
+      "max": 9110.0
+    },
+    "user_cardinality": 26210,
+    "item_cardinality": 7538,
+    "tab": [
+      {
+        "value": "1",
+        "count": 834876,
+        "share": 0.731634
+      },
+      {
+        "value": "0",
+        "count": 150013,
+        "share": 0.131462
+      },
+      {
+        "value": "4",
+        "count": 75524,
+        "share": 0.066185
+      },
+      {
+        "value": "2",
+        "count": 39291,
+        "share": 0.034432
+      },
+      {
+        "value": "6",
+        "count": 29671,
+        "share": 0.026002
+      },
+      {
+        "value": "3",
+        "count": 3574,
+        "share": 0.003132
+      },
+      {
+        "value": "5",
+        "count": 3402,
+        "share": 0.002981
+      },
+      {
+        "value": "8",
+        "count": 2551,
+        "share": 0.002236
+      },
+      {
+        "value": "12",
+        "count": 834,
+        "share": 0.000731
+      },
+      {
+        "value": "11",
+        "count": 417,
+        "share": 0.000365
+      },
+      {
+        "value": "7",
+        "count": 333,
+        "share": 0.000292
+      },
+      {
+        "value": "13",
+        "count": 283,
+        "share": 0.000248
+      },
+      {
+        "value": "9",
+        "count": 252,
+        "share": 0.000221
+      },
+      {
+        "value": "10",
+        "count": 80,
+        "share": 7e-05
+      },
+      {
+        "value": "14",
+        "count": 11,
+        "share": 1e-05
+      }
+    ],
+    "duplicate_user_item": {
+      "unique_pairs": 1092750,
+      "duplicate_rows": 48362,
+      "duplicate_row_rate": 0.042381,
+      "max_repetitions": 22
+    }
+  },
+  "valid": {
+    "rows": 124909,
+    "users": 22377,
+    "items": 5951,
+    "target_positive_rate": 0.313284,
+    "auxiliary_positive_rates": {
+      "is_click": 0.443827,
+      "is_like": 0.017973,
+      "is_follow": 0.001305,
+      "is_comment": 0.00233,
+      "is_forward": 0.000777,
+      "is_hate": 0.000624,
+      "is_profile_enter": 0.019454
+    },
+    "numeric_quantiles": {
+      "duration_ms": {
+        "min": 0.0,
+        "p50": 70483.0,
+        "p90": 250000.0,
+        "p99": 421400.0,
+        "max": 1177720.0
+      },
+      "play_time_ms": {
+        "min": 0.0,
+        "p50": 4557.0,
+        "p90": 62261.0,
+        "p99": 205914.0,
+        "max": 778707.0
+      },
+      "profile_stay_time": {
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "max": 140404.0
+      },
+      "comment_stay_time": {
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 13339.0,
+        "max": 253595.0
+      }
+    },
+    "impressions_per_user": {
+      "min": 1.0,
+      "p50": 4.0,
+      "p90": 12.0,
+      "p99": 26.0,
+      "max": 74.0
+    },
+    "impressions_per_item": {
+      "min": 1.0,
+      "p50": 7.0,
+      "p90": 51.0,
+      "p99": 213.0,
+      "max": 748.0
+    },
+    "user_cardinality": 22377,
+    "item_cardinality": 5951,
+    "tab": [
+      {
+        "value": "1",
+        "count": 92672,
+        "share": 0.741916
+      },
+      {
+        "value": "0",
+        "count": 13726,
+        "share": 0.109888
+      },
+      {
+        "value": "4",
+        "count": 7877,
+        "share": 0.063062
+      },
+      {
+        "value": "6",
+        "count": 5170,
+        "share": 0.04139
+      },
+      {
+        "value": "2",
+        "count": 3834,
+        "share": 0.030694
+      },
+      {
+        "value": "8",
+        "count": 547,
+        "share": 0.004379
+      },
+      {
+        "value": "5",
+        "count": 291,
+        "share": 0.00233
+      },
+      {
+        "value": "12",
+        "count": 226,
+        "share": 0.001809
+      },
+      {
+        "value": "3",
+        "count": 177,
+        "share": 0.001417
+      },
+      {
+        "value": "11",
+        "count": 121,
+        "share": 0.000969
+      },
+      {
+        "value": "9",
+        "count": 92,
+        "share": 0.000737
+      },
+      {
+        "value": "7",
+        "count": 84,
+        "share": 0.000672
+      },
+      {
+        "value": "13",
+        "count": 57,
+        "share": 0.000456
+      },
+      {
+        "value": "10",
+        "count": 30,
+        "share": 0.00024
+      },
+      {
+        "value": "14",
+        "count": 5,
+        "share": 4e-05
+      }
+    ],
+    "duplicate_user_item": {
+      "unique_pairs": 121337,
+      "duplicate_rows": 3572,
+      "duplicate_row_rate": 0.028597,
+      "max_repetitions": 7
+    }
+  },
+  "drift": {
+    "categorical_total_variation": {
+      "tab": 0.030801,
+      "date": 1.0,
+      "is_rand": 0.0
+    }
+  },
+  "cold_start": {
+    "validation_unseen_user_rows": 1990,
+    "validation_unseen_user_rate": 0.015932,
+    "validation_unseen_item_rows": 17,
+    "validation_unseen_item_rate": 0.000136
+  },
+  "data_findings": [
+    {
+      "id": "eda:label-shift",
+      "observation": "long_view rate is 0.3366 in train and 0.3133 in validation",
+      "implication": "Prefer robust ranking features and verify temporal generalization.",
+      "evidence_type": "train_validation_drift"
+    },
+    {
+      "id": "eda:item-cold-start",
+      "observation": "17 validation impressions use items unseen in train",
+      "implication": "Provide explicit unknown/default behavior for item-derived features.",
+      "evidence_type": "cold_start"
+    },
+    {
+      "id": "eda:repeated-pairs",
+      "observation": "validation contains 3572 repeated user-item rows",
+      "implication": "Do not use user-item as a unique prediction key; preserve row order.",
+      "evidence_type": "ranking_protocol"
+    }
+  ],
+  "candidate_data": {
+    "root": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/candidate_data",
+    "raw_files_are_immutable_inputs": true,
+    "baseline_fields": [
+      "user_id",
+      "video_id",
+      "author_id",
+      "tab",
+      "dur_bucket"
+    ],
+    "files": {
+      "log_standard_4_08_to_4_21_pure.csv": {
+        "role": "training interactions",
+        "columns": [
+          "user_id",
+          "video_id",
+          "date",
+          "hourmin",
+          "time_ms",
+          "is_click",
+          "is_like",
+          "is_follow",
+          "is_comment",
+          "is_forward",
+          "is_hate",
+          "long_view",
+          "play_time_ms",
+          "duration_ms",
+          "profile_stay_time",
+          "comment_stay_time",
+          "is_profile_enter",
+          "is_rand",
+          "tab"
+        ]
+      },
+      "log_standard_4_22_to_5_08_pure.csv": {
+        "role": "validation interactions only in this filtered view",
+        "columns": [
+          "user_id",
+          "video_id",
+          "date",
+          "hourmin",
+          "time_ms",
+          "is_click",
+          "is_like",
+          "is_follow",
+          "is_comment",
+          "is_forward",
+          "is_hate",
+          "long_view",
+          "play_time_ms",
+          "duration_ms",
+          "profile_stay_time",
+          "comment_stay_time",
+          "is_profile_enter",
+          "is_rand",
+          "tab"
+        ]
+      },
+      "user_features_pure.csv": {
+        "role": "static user features keyed by user_id",
+        "columns": [
+          "user_id",
+          "user_active_degree",
+          "is_lowactive_period",
+          "is_live_streamer",
+          "is_video_author",
+          "follow_user_num",
+          "follow_user_num_range",
+          "fans_user_num",
+          "fans_user_num_range",
+          "friend_user_num",
+          "friend_user_num_range",
+          "register_days",
+          "register_days_range",
+          "onehot_feat0",
+          "onehot_feat1",
+          "onehot_feat2",
+          "onehot_feat3",
+          "onehot_feat4",
+          "onehot_feat5",
+          "onehot_feat6",
+          "onehot_feat7",
+          "onehot_feat8",
+          "onehot_feat9",
+          "onehot_feat10",
+          "onehot_feat11",
+          "onehot_feat12",
+          "onehot_feat13",
+          "onehot_feat14",
+          "onehot_feat15",
+          "onehot_feat16",
+          "onehot_feat17"
+        ]
+      },
+      "video_features_basic_pure.csv": {
+        "role": "item metadata keyed by video_id",
+        "columns": [
+          "video_id",
+          "author_id",
+          "video_type",
+          "upload_dt",
+          "upload_type",
+          "visible_status",
+          "video_duration",
+          "server_width",
+          "server_height",
+          "music_id",
+          "music_type",
+          "tag"
+        ]
+      },
+      "video_features_statistic_pure.csv": {
+        "role": "organizer item statistics keyed by video_id",
+        "columns": [
+          "video_id",
+          "counts",
+          "show_cnt",
+          "show_user_num",
+          "play_cnt",
+          "play_user_num",
+          "play_duration",
+          "complete_play_cnt",
+          "complete_play_user_num",
+          "valid_play_cnt",
+          "valid_play_user_num",
+          "long_time_play_cnt",
+          "long_time_play_user_num",
+          "short_time_play_cnt",
+          "short_time_play_user_num",
+          "play_progress",
+          "comment_stay_duration",
+          "like_cnt",
+          "like_user_num",
+          "click_like_cnt",
+          "double_click_cnt",
+          "cancel_like_cnt",
+          "cancel_like_user_num",
+          "comment_cnt",
+          "comment_user_num",
+          "direct_comment_cnt",
+          "reply_comment_cnt",
+          "delete_comment_cnt",
+          "delete_comment_user_num",
+          "comment_like_cnt",
+          "comment_like_user_num",
+          "follow_cnt",
+          "follow_user_num",
+          "cancel_follow_cnt",
+          "cancel_follow_user_num",
+          "share_cnt",
+          "share_user_num",
+          "download_cnt",
+          "download_user_num",
+          "report_cnt",
+          "report_user_num",
+          "reduce_similar_cnt",
+          "reduce_similar_user_num",
+          "collect_cnt",
+          "collect_user_num",
+          "cancel_collect_cnt",
+          "cancel_collect_user_num",
+          "direct_comment_user_num",
+          "reply_comment_user_num",
+          "share_all_cnt",
+          "share_all_user_num",
+          "outsite_share_all_cnt"
+        ]
+      }
+    },
+    "implementation_boundary": "Read these CSVs through --data_dir and implement joins, train-fitted encoders, histories, and transformations inside the confined candidate model.py or its hashed local helper modules."
+  }
+}

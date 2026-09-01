@@ -1,7 +1,7 @@
 # Experiment artifacts
 
-This directory is the durable, Git-tracked record of autonomous research runs. It is
-both the agent's experiment memory and the primary evidence surface for judges.
+Per-run evidence is durable locally but Git-ignored. The trusted finalizer copies the
+one promoted run into the Git-tracked `final/run/` evidence surface for judges.
 
 ## Layout
 
@@ -30,8 +30,8 @@ artifacts/
 - `reports/summary.md` is the human-readable view generated from the run state.
 - `final/` contains only the explicitly selected submission and its evidence.
 
-The agent writes temporary trial implementations to the Git-ignored
-`experiment_workspace/`. Promote the validation-best candidate with the trusted
+The agent writes immutable candidate bundles and a versioned local champion archive to the
+Git-ignored `experiment_workspace/`. Promote the conservative frozen winner with the trusted
 finalizer instead of copying a peak trial by hand:
 
 ```bash
@@ -39,7 +39,8 @@ finalizer instead of copying a peak trial by hand:
 ```
 
 It accepts a converged run (or an explicitly acknowledged official hard-budget stop),
-copies the selected model and dependency lock, generates the aligned prediction CSV, runs
+reproduces its recorded validation metrics with the same source/config/seed, copies the selected
+model and dependency lock, generates the aligned prediction CSV, runs
 the organiser's format/alignment check, and writes the final metrics and report. It does
 not score the hidden split.
 

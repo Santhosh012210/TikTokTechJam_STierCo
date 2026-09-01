@@ -1,0 +1,30 @@
+{
+  "query": "user behaviour sequence modelling DIN SIM click-through rate",
+  "results": [
+    {
+      "chunk_id": "sim#what-it-is",
+      "method": "sim",
+      "title": "SIM: Search-based Interest Model",
+      "section": "What it is",
+      "score": 12.0413,
+      "text": "DIN applied to very long histories, made tractable by a retrieval step. Attention over a\nuser's full lifetime of behaviour is too expensive, so SIM first *retrieves* a small\nrelevant subset of the history, then attends over only that subset.\n\nTwo retrieval modes:\n\n- **Hard search**: keep only history items sharing a categorical attribute with the\n  candidate — same category, same author, same tag. Requires no training, just an index.\n- **Soft search**: retrieve by embedding similarity to the candidate, using an index\n  trained jointly with an auxiliary CTR task.\n\nHard search is what most deployments use, because it is essentially free and the\ncategory signal is strong."
+    },
+    {
+      "chunk_id": "din#why-it-helps-a-ranking-metric",
+      "method": "din",
+      "title": "DIN: Deep Interest Network",
+      "section": "Why it helps a ranking metric",
+      "score": 9.5635,
+      "text": "This is the property that matters for within-user ranking. A static user embedding is\n*constant within a user*, so under a ranking metric that only reads intra-user order, it\ncontributes nothing — it shifts every score in the list by the same amount. Any model\nwhose user-side contribution is a fixed vector is spending parameters on something the\nmetric cannot see.\n\nDIN's user vector is a function of the candidate, so it varies within the user's list.\nThat is the whole point: it converts user-side information from a rank-invariant constant\ninto a term that actually reorders the list.\n\nIf the current feature set contains no behaviour sequence at all, this is untouched\nterritory rather than an incremental tweak — the model currently has no way to express\n\"this user has watched things like this before\"."
+    },
+    {
+      "chunk_id": "din#what-it-is",
+      "method": "din",
+      "title": "DIN: Deep Interest Network",
+      "section": "What it is",
+      "score": 9.485,
+      "text": "A CTR model that represents a user by *attending* over their behaviour history with\nrespect to the candidate item, rather than by a single static user embedding.\n\nThe standard approach pools a user's history into one fixed vector — usually a mean of\nthe embeddings of items they interacted with. DIN's observation is that this is wasteful:\na user who watched cooking videos and basketball videos gets one blended vector, and that\nblend is used whether the candidate is a recipe or a game highlight. DIN instead computes\nattention weights between the candidate item and each history item, then pools with those\nweights:\n\n    weights = a(e_history_j, e_candidate)      # small MLP, one scalar per history item\n    u = sum_j weights_j * e_history_j          # candidate-specific user vector\n\nThe user representation therefore changes for every candidate being scored."
+    }
+  ],
+  "bootstrap_counted": true
+}

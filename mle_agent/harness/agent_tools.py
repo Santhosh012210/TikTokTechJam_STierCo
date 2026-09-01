@@ -459,6 +459,28 @@ def semantic_model_fingerprint(path: Path) -> str | None:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def candidate_execution_fingerprint(
+    source_fingerprint: str | None,
+    *,
+    seed: int,
+    trial_config: dict[str, object] | None,
+) -> str | None:
+    """Identity of a scored candidate, including all data-only run parameters."""
+    if source_fingerprint is None:
+        return None
+    payload = json.dumps(
+        {
+            "source": source_fingerprint,
+            "seed": int(seed),
+            "trial_config": trial_config or {},
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 # The starter-kit README (baseline_kuairand-starter-kit/README.md:122-133) records
 # two directions the organizers measured and that add nothing. Prior autonomous
 # runs proposed both anyway. Reject a run_model / run_sweep proposal that repeats one.
@@ -583,6 +605,9 @@ class ModelExecution:
     seed: int | None = None
     trial_config: dict[str, object] | None = None
     resource_usage: dict[str, object] = field(default_factory=dict)
+    execution_id: str | None = None
+    source_sha256: str | None = None
+    source_snapshot_path: str | None = None
 
 
 def _safe_float_metrics(metrics: dict) -> dict:
@@ -645,7 +670,9 @@ def execute_model(
             seed=seed, trial_config=trial_config,
         )
 
-    source = model_path.read_text(encoding="utf-8", errors="replace")
+    source_bytes = model_path.read_bytes()
+    source = source_bytes.decode("utf-8", errors="replace")
+    source_sha256 = hashlib.sha256(source_bytes).hexdigest()
     violations = scan_candidate_source(source)
     if violations:
         message = f"REJECTED: validation-only policy violations: {violations}"
@@ -654,21 +681,86 @@ def execute_model(
             seed=seed, trial_config=trial_config,
         )
 
+    execution_id = uuid.uuid4().hex
+    harness_dir = candidate_dir / ".harness"
+    harness_dir.mkdir(exist_ok=True)
+    execution_dir = harness_dir / "executions" / execution_id
+    execution_dir.mkdir(parents=True)
+    source_snapshot = execution_dir / "model.py"
+    source_snapshot.write_bytes(source_bytes)
+    # Python's audit hook is installed by sitecustomize before candidate code is
+    # imported. It blocks network/process escape and constrains file access to the
+    # candidate bundle, filtered data view, starter kit, interpreter, and this
+    # execution's private temp directory. Resolving paths defeats symlink escapes.
+    sandbox_bootstrap = execution_dir / "sitecustomize.py"
+    sandbox_bootstrap.write_text(
+        """import json, os, sys
+_roots = tuple(os.path.realpath(p) for p in json.loads(os.environ.pop('MLE_AGENT_ALLOWED_ROOTS')))
+_blocked = {'socket.connect', 'socket.connect_ex', 'socket.getaddrinfo', 'subprocess.Popen', 'os.system'}
+def _inside(path):
+    try:
+        resolved = os.path.realpath(os.fspath(path))
+    except (TypeError, ValueError):
+        return True
+    return any(resolved == root or resolved.startswith(root + os.sep) for root in _roots)
+def _audit(event, args):
+    if event in _blocked:
+        raise PermissionError('candidate sandbox blocked ' + event)
+    if event in {'open', 'os.listdir', 'os.scandir', 'os.chdir'} and args and not _inside(args[0]):
+        raise PermissionError('candidate sandbox blocked path outside allowed roots')
+sys.addaudithook(_audit)
+""",
+        encoding="utf-8",
+    )
+
+    # Use an allowlist: inherited shells commonly contain unrelated cloud,
+    # database, and telemetry credentials whose names the harness cannot predict.
+    candidate_env_names = {
+        "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "SYSTEMROOT", "WINDIR",
+        "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS",
+    }
     env = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in {
-            "LLM_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY",
-            "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_API_KEY",
-        }
+        key: value for key, value in os.environ.items()
+        if key in candidate_env_names
     }
     # Only the organiser starter kit is importable. The project root is deliberately
     # absent so candidate code cannot import trusted harness modules across the
     # boundary; the prediction and submission writers are inlined into the candidate.
-    env["PYTHONPATH"] = str(config.BASELINE_ROOT)
-    harness_dir = candidate_dir / ".harness"
-    harness_dir.mkdir(exist_ok=True)
-    prediction_path = harness_dir / f"validation_predictions_seed_{seed}.csv"
+    execution_tmp = execution_dir / "tmp"
+    execution_tmp.mkdir()
+    interpreter_root = Path(config.PYTHON_EXE).resolve().parent.parent
+    environment_root = Path(config.PYTHON_EXE).absolute().parent.parent
+    allowed_roots = [
+        candidate_dir.resolve(),
+        config.DATA_DIR.resolve(),
+        config.BASELINE_ROOT.resolve(),
+        execution_tmp.resolve(),
+        interpreter_root,
+        environment_root,
+        Path("/usr"),
+        Path("/System"),
+        Path("/Library"),
+        Path("/dev"),
+        Path("/etc"),
+    ]
+    if config.RUN_ENV_DIR is not None:
+        allowed_roots.append(config.RUN_ENV_DIR.resolve())
+    # The per-run venv inherits the repository venv's already-installed packages
+    # through a .pth file.  Python can discover those distributions without this
+    # entry, but the candidate audit hook must also permit their package files to
+    # be opened.  Restrict the exception to the base interpreter's venv root; the
+    # project root and trusted harness remain outside the candidate boundary.
+    if config.BASE_PYTHON_EXE:
+        allowed_roots.append(
+            Path(config.BASE_PYTHON_EXE).absolute().parent.parent
+        )
+    env["MLE_AGENT_ALLOWED_ROOTS"] = json.dumps([str(path) for path in allowed_roots])
+    env["TMPDIR"] = str(execution_tmp)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(execution_dir), str(config.BASELINE_ROOT)]
+    )
+    prediction_path = harness_dir / f"validation_predictions_{execution_id}_seed_{seed}.csv"
     prediction_path.unlink(missing_ok=True)
     command = [
         config.PYTHON_EXE,
@@ -681,7 +773,7 @@ def execute_model(
         str(prediction_path),
     ]
     if trial_config is not None:
-        trial_config_path = harness_dir / f"trial_config_seed_{seed}.json"
+        trial_config_path = execution_dir / "trial_config.json"
         trial_config_path.write_text(
             json.dumps(trial_config, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
             encoding="utf-8",
@@ -703,11 +795,15 @@ def execute_model(
             False, None, output, f"TIMEOUT after {timeout_seconds}s", time.time() - started,
             seed=seed, trial_config=trial_config,
             resource_usage={"timeout_seconds": timeout_seconds},
+            execution_id=execution_id, source_sha256=source_sha256,
+            source_snapshot_path=str(source_snapshot),
         )
     except Exception as exc:
         return ModelExecution(
             False, None, "", f"ERROR: {exc}", time.time() - started,
             seed=seed, trial_config=trial_config,
+            execution_id=execution_id, source_sha256=source_sha256,
+            source_snapshot_path=str(source_snapshot),
         )
 
     output = redact_secrets(result.stdout + result.stderr)
@@ -715,11 +811,21 @@ def execute_model(
         output = output[-12_000:]
     after_usage = _sample_child_usage()
     usage = _child_usage_delta(before_usage, after_usage, timeout_seconds)
+    if not model_path.is_file() or hashlib.sha256(model_path.read_bytes()).hexdigest() != source_sha256:
+        error = "REJECTED: model.py changed while it was executing; scored source must be immutable"
+        return ModelExecution(
+            False, None, output, error, time.time() - started,
+            seed=seed, trial_config=trial_config, resource_usage=usage,
+            execution_id=execution_id, source_sha256=source_sha256,
+            source_snapshot_path=str(source_snapshot),
+        )
     if result.returncode != 0:
         error = f"model.py exited {result.returncode}\n{output[-6000:]}"
         return ModelExecution(
             False, None, output, error, time.time() - started,
             seed=seed, trial_config=trial_config, resource_usage=usage,
+            execution_id=execution_id, source_sha256=source_sha256,
+            source_snapshot_path=str(source_snapshot),
         )
     if not prediction_path.is_file():
         error = (
@@ -729,6 +835,8 @@ def execute_model(
         return ModelExecution(
             False, None, output, error, time.time() - started,
             seed=seed, trial_config=trial_config, resource_usage=usage,
+            execution_id=execution_id, source_sha256=source_sha256,
+            source_snapshot_path=str(source_snapshot),
         )
     try:
         scored = score_validation_predictions(
@@ -742,6 +850,8 @@ def execute_model(
             False, None, output, error, time.time() - started,
             prediction_path=str(prediction_path), seed=seed,
             trial_config=trial_config, resource_usage=usage,
+            execution_id=execution_id, source_sha256=source_sha256,
+            source_snapshot_path=str(source_snapshot),
         )
     prediction_sha256 = hashlib.sha256(prediction_path.read_bytes()).hexdigest()
     return ModelExecution(
@@ -755,6 +865,9 @@ def execute_model(
         seed=seed,
         trial_config=trial_config,
         resource_usage=usage,
+        execution_id=execution_id,
+        source_sha256=source_sha256,
+        source_snapshot_path=str(source_snapshot),
     )
 
 
@@ -1065,6 +1178,7 @@ class AgentToolRuntime:
         iteration: int = 0,
         experiments_remaining: int | None = None,
         failed_fingerprints: set[str] | None = None,
+        required_target_component: str | None = None,
     ) -> None:
         self.candidate_dir = candidate_dir
         self.config = config
@@ -1077,6 +1191,8 @@ class AgentToolRuntime:
         # How many of the 50 scored variants the run has left. Bounds a sweep so it
         # cannot overspend the official budget. None means no caller-enforced cap.
         self.experiments_remaining = experiments_remaining
+        self.required_target_component = required_target_component
+        self._variant_attempts = 0
         self.bootstrap_state = bootstrap_state or BootstrapState()
         self.dependency_approver = dependency_approver
         self.dependency_installer = dependency_installer or install_python_dependencies
@@ -1689,28 +1805,74 @@ class AgentToolRuntime:
                 return json.dumps(record, ensure_ascii=False, indent=2)
 
             execution = execute_model(self.candidate_dir, self.config)
+            expected_metrics = {
+                "GAUC": self.config.BASELINE_GAUC,
+                "nDCG@5": self.config.BASELINE_NDCG,
+                "primary": self.config.BASELINE_PRIMARY,
+            }
             score_matches = bool(
                 execution.success
                 and execution.metrics is not None
-                and abs(
-                    float(execution.metrics["primary"]) - self.config.BASELINE_PRIMARY
-                ) <= self.config.CONVERGENCE_EPSILON
+                and all(
+                    abs(float(execution.metrics[name]) - expected)
+                    <= self.config.CONVERGENCE_EPSILON
+                    for name, expected in expected_metrics.items()
+                )
             )
             error = execution.error
             if execution.success and not score_matches:
                 error = (
-                    "BASELINE_MISMATCH: validation primary "
-                    f"{execution.metrics['primary']:.6f} differs from official "
-                    f"{self.config.BASELINE_PRIMARY:.6f} by more than "
-                    f"{self.config.CONVERGENCE_EPSILON:.6f}"
+                    "BASELINE_MISMATCH: reproduced validation metrics differ from the "
+                    f"organizer reference {expected_metrics!r} by more than "
+                    f"{self.config.CONVERGENCE_EPSILON:.6f}: {execution.metrics!r}"
+                )
+            official_scores = json.loads(
+                self.config.BASELINE_JSON.read_text(encoding="utf-8")
+            )
+            fm_reference = official_scores["scores"]["fm_official"]
+            reference_config = fm_reference["config"]
+            required_reference_config = {
+                "model": "FM", "k": 16, "lr": 0.001, "batch": 8192,
+                "max_epochs": 40, "patience": 4,
+                "fields": ["user_id", "video_id", "author_id", "tab", "dur_bucket"],
+            }
+            config_matches = reference_config == required_reference_config
+            if not config_matches:
+                error = (
+                    "OFFICIAL_BASELINE_DEFINITION_MISMATCH: baseline_scores.json no longer "
+                    f"contains the pinned organizer FM config: {reference_config!r}"
                 )
             record = {
-                "success": execution.success and score_matches,
+                "success": execution.success and score_matches and config_matches,
                 "metrics": execution.metrics,
-                "expected_primary": self.config.BASELINE_PRIMARY,
+                "expected_metrics": expected_metrics,
                 "tolerance": self.config.CONVERGENCE_EPSILON,
                 "error": error,
                 "wall_seconds": execution.wall_seconds,
+                "seed": execution.seed,
+                "trial_config": execution.trial_config or {},
+                "execution_id": getattr(execution, "execution_id", None),
+                "source_sha256": getattr(execution, "source_sha256", None),
+                "source_snapshot_path": getattr(execution, "source_snapshot_path", None),
+                "prediction_sha256": execution.prediction_sha256,
+                "organizer_reference": {
+                    "baseline_path": str(self.config.BASELINE_ROOT / "baseline.py"),
+                    "baseline_sha256": hashlib.sha256(
+                        (self.config.BASELINE_ROOT / "baseline.py").read_bytes()
+                    ).hexdigest(),
+                    "scores_path": str(self.config.BASELINE_JSON),
+                    "scores_sha256": hashlib.sha256(
+                        self.config.BASELINE_JSON.read_bytes()
+                    ).hexdigest(),
+                    "config": reference_config,
+                    "published_valid": fm_reference["valid"],
+                    "published_hidden_test": fm_reference["test"],
+                    "published_hidden_test_std_over_5_seeds": (
+                        fm_reference["std_over_5_seeds"]
+                    ),
+                    "comparison_split": "validation",
+                    "hidden_test_was_not_scored": True,
+                },
             }
             self.bootstrap_state.baseline_execution = record
             if record["success"]:
@@ -1922,10 +2084,19 @@ class AgentToolRuntime:
         if name == "run_model":
             if not self.bootstrap_state.complete:
                 return self._bootstrap_rejection("run_model")
-            candidate_fingerprint = semantic_model_fingerprint(
+            source_fingerprint = semantic_model_fingerprint(
                 self.candidate_dir / "model.py"
             )
-            candidate_changed = candidate_fingerprint != self.inherited_model_fingerprint
+            candidate_changed = source_fingerprint != self.inherited_model_fingerprint
+            requested_seed = int(
+                self.config.SEED if payload.get("seed") is None else payload["seed"]
+            )
+            trial_config = payload.get("trial_config")
+            candidate_fingerprint = candidate_execution_fingerprint(
+                source_fingerprint,
+                seed=requested_seed,
+                trial_config=trial_config if isinstance(trial_config, dict) else None,
+            )
             allowed_components = set(RUN_MODEL_COMPONENTS)
             target_component = str(payload.get("target_component", "")).strip().lower()
             if target_component not in allowed_components:
@@ -1939,6 +2110,25 @@ class AgentToolRuntime:
                     "error": "INVALID_TARGET_COMPONENT: declare one supported pipeline component",
                     "wall_seconds": 0.0,
                     "candidate_changed": candidate_changed,
+                }
+                self.executions.append(record)
+                return json.dumps(record, ensure_ascii=False, indent=2)
+            if (
+                self.required_target_component is not None
+                and target_component != self.required_target_component
+            ):
+                record = {
+                    "hypothesis": str(payload.get("hypothesis", "")),
+                    "reasoning": str(payload.get("reasoning", "")),
+                    "proposal": {"target_component": target_component},
+                    "success": False,
+                    "metrics": None,
+                    "error": (
+                        "FRONTIER_BRANCH_COMPONENT_REQUIRED: this breadth experiment must "
+                        f"target '{self.required_target_component}', not '{target_component}'"
+                    ),
+                    "wall_seconds": 0.0,
+                    "candidate_changed": True,
                 }
                 self.executions.append(record)
                 return json.dumps(record, ensure_ascii=False, indent=2)
@@ -1994,7 +2184,12 @@ class AgentToolRuntime:
                 self.executions.append(record)
                 return json.dumps(record, ensure_ascii=False, indent=2)
 
-            if candidate_fingerprint in self.failed_fingerprints:
+            legacy_default_repeat = (
+                requested_seed == self.config.SEED
+                and not trial_config
+                and source_fingerprint in self.failed_fingerprints
+            )
+            if candidate_fingerprint in self.failed_fingerprints or legacy_default_repeat:
                 record = {
                     "hypothesis": str(payload.get("hypothesis", "")),
                     "reasoning": str(payload.get("reasoning", "")),
@@ -2115,10 +2310,6 @@ class AgentToolRuntime:
                 return json.dumps(record, ensure_ascii=False, indent=2)
 
             execution_class = str(payload.get("execution_class", "normal"))
-            requested_seed = int(
-                self.config.SEED if payload.get("seed") is None else payload["seed"]
-            )
-            trial_config = payload.get("trial_config")
             if trial_config is not None and not isinstance(trial_config, dict):
                 record = {
                     "hypothesis": str(payload.get("hypothesis", "")),
@@ -2147,6 +2338,23 @@ class AgentToolRuntime:
                 }
                 self.executions.append(record)
                 return json.dumps(record, ensure_ascii=False, indent=2)
+            if (
+                self.experiments_remaining is not None
+                and self._variant_attempts >= self.experiments_remaining
+            ):
+                record = {
+                    "hypothesis": str(payload.get("hypothesis", "")),
+                    "reasoning": str(payload.get("reasoning", "")),
+                    "proposal": proposal,
+                    "success": False,
+                    "metrics": None,
+                    "error": "EXPERIMENT_BUDGET_EXHAUSTED: no scored variants remain",
+                    "wall_seconds": 0.0,
+                    "candidate_changed": True,
+                }
+                self.executions.append(record)
+                return json.dumps(record, ensure_ascii=False, indent=2)
+            self._variant_attempts += 1
             execution = execute_model(
                 self.candidate_dir,
                 self.config,
@@ -2180,9 +2388,13 @@ class AgentToolRuntime:
                 ),
                 "prediction_path": execution.prediction_path,
                 "prediction_sha256": execution.prediction_sha256,
+                "execution_id": getattr(execution, "execution_id", None),
+                "source_sha256": getattr(execution, "source_sha256", None),
+                "source_snapshot_path": getattr(execution, "source_snapshot_path", None),
                 "resource_usage": execution.resource_usage,
                 "execution_class": execution_class,
                 "execution_grant": grant,
+                "execution_attempted": True,
             }
             self.executions.append(record)
             if execution.success and candidate_fingerprint is not None:
@@ -2227,6 +2439,15 @@ class AgentToolRuntime:
             return self._sweep_rejection(
                 payload, "INVALID_TARGET_COMPONENT: declare one supported pipeline component"
             )
+        if (
+            self.required_target_component is not None
+            and target_component != self.required_target_component
+        ):
+            return self._sweep_rejection(
+                payload,
+                "FRONTIER_BRANCH_COMPONENT_REQUIRED: this breadth experiment must "
+                f"target '{self.required_target_component}', not '{target_component}'",
+            )
         proposal = {
             "target_component": target_component,
             "expected_effect": str(payload.get("expected_effect", "")),
@@ -2240,8 +2461,8 @@ class AgentToolRuntime:
             return self._sweep_rejection(
                 payload, "SKIPPED: model.py failed its PostFileSave check; fix and save first."
             )
-        fingerprint = semantic_model_fingerprint(self.candidate_dir / "model.py")
-        if fingerprint == self.inherited_model_fingerprint:
+        source_fingerprint = semantic_model_fingerprint(self.candidate_dir / "model.py")
+        if source_fingerprint == self.inherited_model_fingerprint:
             return self._sweep_rejection(
                 payload, "REJECTED: model.py is semantically unchanged from the inherited candidate."
             )
@@ -2282,7 +2503,10 @@ class AgentToolRuntime:
                 )
         cap = len(configs)
         if self.experiments_remaining is not None:
-            cap = min(cap, max(0, self.experiments_remaining))
+            cap = min(
+                cap,
+                max(0, self.experiments_remaining - self._variant_attempts),
+            )
         if cap < 2:
             return self._sweep_rejection(
                 payload, "WALL_BUDGET_EXHAUSTED: not enough scored-variant budget left for a sweep"
@@ -2291,6 +2515,25 @@ class AgentToolRuntime:
         requested_seed = int(
             self.config.SEED if payload.get("seed") is None else payload["seed"]
         )
+        member_fingerprints = [
+            candidate_execution_fingerprint(
+                source_fingerprint, seed=requested_seed, trial_config=cfg
+            )
+            for cfg in configs[:cap]
+        ]
+        if len(set(member_fingerprints)) != len(member_fingerprints):
+            return self._sweep_rejection(
+                payload, "INVALID_SWEEP: duplicate trial configurations are not distinct candidates"
+            )
+        repeated = [
+            fp for fp in member_fingerprints
+            if fp in self.failed_fingerprints
+            or fp in self.bootstrap_state.seen_candidate_fingerprints
+        ]
+        if repeated:
+            return self._sweep_rejection(
+                payload, "REJECTED: at least one exact source/config/seed sweep member was already scored"
+            )
         execution_class = str(payload.get("execution_class", "normal"))
         members: list[dict] = []
         for index in range(cap):
@@ -2304,6 +2547,7 @@ class AgentToolRuntime:
                 seed=requested_seed,
                 trial_config=configs[index],
             )
+            self._variant_attempts += 1
             record = {
                 "hypothesis": str(payload.get("hypothesis", "")),
                 "reasoning": str(payload.get("reasoning", "")),
@@ -2318,18 +2562,27 @@ class AgentToolRuntime:
                 "trial_config": execution.trial_config,
                 "prediction_path": execution.prediction_path,
                 "prediction_sha256": execution.prediction_sha256,
+                "execution_id": getattr(execution, "execution_id", None),
+                "source_sha256": getattr(execution, "source_sha256", None),
+                "source_snapshot_path": getattr(execution, "source_snapshot_path", None),
                 "resource_usage": execution.resource_usage,
                 "execution_class": execution_class,
                 "execution_grant": grant,
+                "candidate_fingerprint": member_fingerprints[index],
                 "sweep_id": sweep_id,
                 "sweep_member": index,
                 "sweep_size": cap,
+                "execution_attempted": True,
             }
             self.executions.append(record)
             members.append(record)
         successful = [m for m in members if m["success"]]
-        if successful and fingerprint is not None:
-            self.bootstrap_state.seen_candidate_fingerprints.add(fingerprint)
+        if successful:
+            self.bootstrap_state.seen_candidate_fingerprints.update(
+                str(member["candidate_fingerprint"])
+                for member in successful
+                if member.get("candidate_fingerprint")
+            )
             self.bootstrap_state.scored_experiments.append({
                 "iteration": self.iteration,
                 "target_component": target_component,

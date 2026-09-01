@@ -1,0 +1,30 @@
+{
+  "query": "multi-task learning auxiliary objectives recommender",
+  "results": [
+    {
+      "chunk_id": "mmoe#why-it-helps-a-ranking-metric",
+      "method": "mmoe",
+      "title": "MMoE: Multi-gate Mixture-of-Experts",
+      "section": "Why it helps a ranking metric",
+      "score": 7.5855,
+      "text": "It addresses the failure mode of naive multi-task learning: the seesaw effect, where\nadding an auxiliary task improves it and degrades the main one because both are forced\nthrough one shared representation that cannot serve both.\n\nHard parameter sharing (one shared bottom, several heads) works when tasks are closely\nrelated and fails when they are not. In a short-video log, \"did the user click\" and \"did\nthe user watch to completion\" are related but not identical — clickbait scores high on\none and low on the other. That tension is exactly what MMoE's gates are for."
+    },
+    {
+      "chunk_id": "esmm#how-to-implement",
+      "method": "esmm",
+      "title": "ESMM: Entire Space Multi-Task Model",
+      "section": "How to implement",
+      "score": 5.9682,
+      "text": "The cheapest useful version is not full ESMM at all — it is auxiliary-loss multi-task,\nwhich is a few lines:\n\n    total_loss = loss(target_label) + sum_k( w_k * loss(auxiliary_label_k) )\n\nwith one output head (a separate weight vector `W_k` and bias) per label, all reading the\nsame shared embeddings. Backpropagation scatters each head's gradient into the shared\ntable through the same `np.add.at` path already used for the main loss.\n\nStart with `w_k` around 0.1-0.3. Auxiliary weights that are too high let a dense\nauxiliary label dominate the shared representation and pull it away from the target.\n\nThe full ESMM product structure only earns its complexity when the target label is\ngenuinely conditional on another observed event. Check the data first: if the target is\nobserved on every impression rather than only on clicked ones, there is no sample\nselection bias to correct and the product structure adds nothing over auxiliary losses.\n\nSanity check to run before investing: compute the correlation between each auxiliary\nlabel and the target, and the base rate of each. An auxiliary label that is either\nnear-zero correlated or vanishingly rare will not help."
+    },
+    {
+      "chunk_id": "esmm#when-it-will-not-help",
+      "method": "esmm",
+      "title": "ESMM: Entire Space Multi-Task Model",
+      "section": "When it will not help",
+      "score": 5.923,
+      "text": "- If the target label is already observed over the entire impression space, the\n  bias-correction half of the argument does not apply. The regularisation half still\n  might.\n- Auxiliary labels much rarer than the target contribute little gradient.\n- Too many auxiliary tasks with high weights degrades the main task — the seesaw effect.\n  If that happens, that is the signal to move to MMoE or PLE, which exist precisely to\n  address it."
+    }
+  ],
+  "bootstrap_counted": true
+}

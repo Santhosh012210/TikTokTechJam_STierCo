@@ -1,0 +1,38 @@
+{
+  "query": "user behavior history positive interactions recency affinity features recommendation ranking DIN SIM implementation",
+  "results": [
+    {
+      "chunk_id": "sim#why-it-helps-a-ranking-metric",
+      "method": "sim",
+      "title": "SIM: Search-based Interest Model",
+      "section": "Why it helps a ranking metric",
+      "score": 13.8416,
+      "text": "Same mechanism as DIN — a candidate-dependent user vector varies within a user's list and\ntherefore can reorder it — but reaching further back. The additional argument is\nsignal-to-noise: attending over 1000 history items dilutes the relevant ones, whereas\nretrieving the 30 items in the same category as the candidate concentrates them.\n\nFor a short-video dataset where users have hundreds to thousands of logged interactions,\nplain DIN's fixed recent window of 20-50 items discards most of the history, and the\nrecent window is dominated by whatever the user happened to be shown lately rather than\ntheir durable interests."
+    },
+    {
+      "chunk_id": "sim#when-it-will-not-help",
+      "method": "sim",
+      "title": "SIM: Search-based Interest Model",
+      "section": "When it will not help",
+      "score": 10.5914,
+      "text": "- If per-user history is short, retrieval returns almost nothing and SIM degenerates to\n  DIN with extra machinery. Measure the history-length distribution first.\n- If the retrieval key is too coarse (a category with only a handful of distinct values),\n  the retrieved set is barely more relevant than a random slice of history.\n- The soft-search variant needs a jointly trained index and is substantially more work.\n  Do not start there."
+    },
+    {
+      "chunk_id": "sim#what-it-is",
+      "method": "sim",
+      "title": "SIM: Search-based Interest Model",
+      "section": "What it is",
+      "score": 10.3989,
+      "text": "DIN applied to very long histories, made tractable by a retrieval step. Attention over a\nuser's full lifetime of behaviour is too expensive, so SIM first *retrieves* a small\nrelevant subset of the history, then attends over only that subset.\n\nTwo retrieval modes:\n\n- **Hard search**: keep only history items sharing a categorical attribute with the\n  candidate — same category, same author, same tag. Requires no training, just an index.\n- **Soft search**: retrieve by embedding similarity to the candidate, using an index\n  trained jointly with an auxiliary CTR task.\n\nHard search is what most deployments use, because it is essentially free and the\ncategory signal is strong."
+    },
+    {
+      "chunk_id": "din#how-to-implement",
+      "method": "din",
+      "title": "DIN: Deep Interest Network",
+      "section": "How to implement",
+      "score": 10.3227,
+      "text": "Building the history is the bulk of the work and it is where correctness bugs live.\n\n**Leakage rule: a row's history must contain only interactions strictly before that\nrow's timestamp.** Building history from the whole training split and applying it to\ntraining rows leaks the future into the past and produces a validation score that will\nnot reproduce. Sort by (user, timestamp) and take a backward window.\n\n    # for each row, the previous L items that user interacted with, before this row\n    # L = 20..50 is typical; longer needs SIM-style retrieval instead\n    history[i] = last L item_ids of user u strictly before time t_i\n\nStore as a padded `(n_rows, L)` int array plus a `(n_rows,)` length array; pad with a\nreserved index 0 and mask it out of the pooling.\n\nThe attention unit in the paper is a small MLP over\n`[e_hist, e_cand, e_hist - e_cand, e_hist * e_cand]` — the difference and product terms\ncarry the interaction signal and matter more than the depth of the MLP. A pure-numpy\nimplementation can start much simpler and still capture most of the gain:\n\n    # dot-product attention, no learned parameters at all\n    scores = (E_hist * e_cand[:, None, :]).sum(-1) / sqrt(k)\n    scores = where(mask, scores, -inf)\n    w = softmax(scores, axis=1)\n    u = (w[:, :, None] * E_hist).sum(1)\n\nThen feed `u` into the model alongside the existing features — for an FM, the cleanest\nentry point is to add `dot(u, e_cand)` to the logit, which is one extra scalar term.\n\n**Do not normalise the attention weights to sum to 1 in the paper's formulation.** DIN\ndeliberately omits the softmax so that the magnitude of the user vector reflects the\n*intensity* of matching history, not just its direction. Both variants are worth trying;\nthe softmax version is easier to make numerically stable."
+    }
+  ],
+  "bootstrap_counted": true
+}

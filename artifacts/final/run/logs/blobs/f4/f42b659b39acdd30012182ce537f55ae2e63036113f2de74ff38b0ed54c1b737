@@ -1,0 +1,86 @@
+{
+  "hypothesis": "A PLE-inspired shared/private multi-task extension of the five-field DCN-V2, trained on long_view plus click, like, and profile-entry labels with bounded auxiliary weights, will improve long_view ranking by regularizing shared item/context representations while preserving a dedicated long_view tower.",
+  "reasoning": "The incumbent DCN-V2 already demonstrates useful representation interactions (0.603886). Prior MMoE reached approximately 0.604068 three-seed mean but used a different expert/gating architecture and was below the decision threshold. PLE provides a structural response to auxiliary-task seesaw: private task transforms protect the scored task from dense auxiliary gradients (ple#why-it-helps-a-ranking-metric), while ESMM identifies shared-embedding regularization from correlated engagement signals as useful to ranking (esmm#why-it-helps-a-ranking-metric).",
+  "literature_chunk_ids": [
+    "ple#why-it-helps-a-ranking-metric",
+    "esmm#why-it-helps-a-ranking-metric",
+    "mmoe#why-it-helps-a-ranking-metric"
+  ],
+  "proposal": {
+    "target_component": "auxiliary-task",
+    "expected_effect": "Expected +0.0025 primary over the 0.603886 DCN-V2 incumbent if related engagement labels improve candidate-varying user/item/context representations without auxiliary conflict.",
+    "falsification_criterion": "A valid aligned run with long_view-only validation scores fails to improve primary by at least 0.0020 versus 0.603886.",
+    "rollback_plan": "Retain the long_view-only DCN-V2 incumbent. If unsupported, do not infer all auxiliary learning fails; next test watch-progress supervision or a more explicitly conditional auxiliary formulation.",
+    "feature_sources": [
+      "Immutable train-log columns long_view, is_click, is_like, and is_profile_enter, read in the same filtered training file order as data.load().",
+      "The inherited five encoded fields: user_id, video_id, author_id, tab, dur_bucket."
+    ],
+    "feature_transformations": [
+      "No auxiliary labels become input features.",
+      "DCN-V2 produces a shared representation; four task-private 48-unit ReLU towers and heads predict long_view, click, like, and profile entry.",
+      "Optimize weighted BCE losses [1.0, 0.20, 0.35, 0.25], and select only the long_view head for validation scores."
+    ],
+    "leakage_controls": [
+      "Auxiliary targets are read only from dates 20220408–20220421 and are asserted aligned with the train long_view target.",
+      "No validation auxiliary outcome or long_view label enters training features or score construction; validation labels are used only for checkpoint selection through official primary.",
+      "Base categorical vocabularies and duration bins remain fit on training data only; no test access occurs."
+    ]
+  },
+  "success": true,
+  "metrics": {
+    "GAUC": 0.6702390749153169,
+    "nDCG@5": 0.5370013837374301,
+    "primary": 0.6036202293263735,
+    "users": 22377.0,
+    "rows": 124909.0
+  },
+  "error": null,
+  "wall_seconds": 17.22637701034546,
+  "candidate_changed": true,
+  "candidate_fingerprint": "10115938b2655df31ea4908c70566b597fd1b3bcd420e0455941ea805fb7c186",
+  "seed": 0,
+  "trial_config": {
+    "embed_dim": 16,
+    "cross_layers": 2,
+    "hidden": 96,
+    "lr": 0.001,
+    "weight_decay": 1e-06,
+    "epochs": 20,
+    "batch_size": 4096,
+    "patience": 4,
+    "aux_click_weight": 0.2,
+    "aux_like_weight": 0.35,
+    "aux_profile_weight": 0.25
+  },
+  "sanity_check": null,
+  "change_summary": {
+    "hunks": 9,
+    "lines_added": 31,
+    "lines_removed": 8,
+    "parent_lines": 107,
+    "is_rewrite": false,
+    "attribution_warning": "This experiment changed 9 separate regions. A score move cannot be attributed to any single one. State in the reflection which regions the conclusion actually rests on."
+  },
+  "prediction_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_005/.harness/validation_predictions_5ed984eb37524d5a876dcc8cb58ed038_seed_0.csv",
+  "prediction_sha256": "a5111d2a14076aa31d65dea8d81cdfcde2a1e37478d5d437891e631e522924b4",
+  "execution_id": "5ed984eb37524d5a876dcc8cb58ed038",
+  "source_sha256": "fcad4c5e7381c596ee86cecc437cd033e7add93574b4e95a34edd2e138c0f920",
+  "source_snapshot_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_005/.harness/executions/5ed984eb37524d5a876dcc8cb58ed038/model.py",
+  "resource_usage": {
+    "cpu_user_seconds": 16.114863999999955,
+    "cpu_system_seconds": 0.6806029999999996,
+    "peak_rss_platform_units": 1017053184,
+    "timeout_seconds": 1800,
+    "accelerator": "not_measured"
+  },
+  "execution_class": "substantial",
+  "execution_grant": {
+    "granted": true,
+    "requested_class": "substantial",
+    "granted_class": "substantial",
+    "timeout_seconds": 1800,
+    "remaining_wall_seconds": 20585.2,
+    "reason": "requested class 'substantial' granted at 1800s"
+  },
+  "execution_attempted": true
+}

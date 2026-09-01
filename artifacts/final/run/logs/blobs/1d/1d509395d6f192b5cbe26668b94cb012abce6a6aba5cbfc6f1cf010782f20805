@@ -1,0 +1,38 @@
+{
+  "query": "multi task learning click through rate auxiliary click like profile recommender MMoE ranking implementation task weighting",
+  "results": [
+    {
+      "chunk_id": "mmoe#why-it-helps-a-ranking-metric",
+      "method": "mmoe",
+      "title": "MMoE: Multi-gate Mixture-of-Experts",
+      "section": "Why it helps a ranking metric",
+      "score": 21.2642,
+      "text": "It addresses the failure mode of naive multi-task learning: the seesaw effect, where\nadding an auxiliary task improves it and degrades the main one because both are forced\nthrough one shared representation that cannot serve both.\n\nHard parameter sharing (one shared bottom, several heads) works when tasks are closely\nrelated and fails when they are not. In a short-video log, \"did the user click\" and \"did\nthe user watch to completion\" are related but not identical — clickbait scores high on\none and low on the other. That tension is exactly what MMoE's gates are for."
+    },
+    {
+      "chunk_id": "ple#why-it-helps-a-ranking-metric",
+      "method": "ple",
+      "title": "PLE: Progressive Layered Extraction",
+      "section": "Why it helps a ranking metric",
+      "score": 13.7835,
+      "text": "PLE's paper documents that MMoE's gates, in practice, often fail to separate conflicting\ntasks — they converge to near-uniform mixtures and the seesaw persists. Hard-coding the\nprivate/shared split guarantees each task keeps parameters no other task can perturb,\nwhich is a structural fix rather than a learned one.\n\nFor a ranking metric where one label is scored and several are auxiliary, this means the\nscored task retains dedicated capacity that a dense auxiliary label cannot overwrite."
+    },
+    {
+      "chunk_id": "esmm#what-it-is",
+      "method": "esmm",
+      "title": "ESMM: Entire Space Multi-Task Model",
+      "section": "What it is",
+      "score": 12.9493,
+      "text": "A structure for learning a rare downstream signal that is only observed conditional on an\nupstream one. The canonical case is click then conversion: conversion is only observed on\nclicked items, so a model trained on clicks-only data is trained on a biased subsample and\nthen applied to all impressions.\n\nESMM's trick is to never train the conditional model directly. It models two quantities\nover the *entire* impression space and multiplies them:\n\n    p(click & engage | impression) = p(click | impression) * p(engage | click)\n\nBoth towers share their embedding layer. The loss is applied to `p(click)` and to the\n*product* — never to `p(engage | click)` in isolation — so the conditional tower is\nlearned implicitly, on the full impression space, without ever being fed a biased sample."
+    },
+    {
+      "chunk_id": "esmm#why-it-helps-a-ranking-metric",
+      "method": "esmm",
+      "title": "ESMM: Entire Space Multi-Task Model",
+      "section": "Why it helps a ranking metric",
+      "score": 11.301,
+      "text": "Two distinct mechanisms, and it is worth being clear about which one is doing the work.\n\nThe first is the bias correction described above, which matters when the scored label\nitself is conditional.\n\nThe second, and usually the more relevant one for a logged ranking dataset, is\n**shared-embedding regularisation**. Auxiliary signals that correlate with the target\ngive the shared embedding table far more gradient signal than the target alone. In a\nshort-video log, signals like click, like, follow, comment, forward, and completion are\nall correlated with genuine interest. If the scored label is sparse, training the shared\nembeddings against several correlated labels at once produces better item and user\nrepresentations than training against one.\n\nThis helps a within-user ranking metric because it improves the *item-side* embeddings,\nwhich vary within a user's list."
+    }
+  ],
+  "bootstrap_counted": true
+}

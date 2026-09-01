@@ -1,0 +1,81 @@
+{
+  "hypothesis": "Appending causal positive-history affinity bins for a candidate’s author and exact video to the five-field pointwise FM will improve within-user long-view ranking because candidate-dependent past positive behavior identifies durable interest, unlike the previously unsuccessful undifferentiated exposure-only DIN.",
+  "reasoning": "The prior exposure-only DIN was negative, so this test changes the behavioral signal rather than repeating its architecture: only long_view-positive training events populate each user’s history. SIM hard search supports candidate-dependent retrieval by matching a categorical attribute such as author (sim#what-it-is), while DIN implementation guidance requires histories contain only previous events (din#how-to-implement). This compact count/seen representation is a controlled affinity mechanism rather than an expensive exposure sequence.",
+  "literature_chunk_ids": [
+    "sim#what-it-is",
+    "sim#why-it-helps-a-ranking-metric",
+    "din#how-to-implement"
+  ],
+  "proposal": {
+    "target_component": "sequence",
+    "expected_effect": "Expected +0.003 primary versus 0.601469 if author/video positive affinity reorders candidates for returning users; no expected effect for unseen users, which receive explicit zero-history defaults.",
+    "falsification_criterion": "A valid, leakage-safe history encoder with correct output alignment fails to exceed the 0.601469 baseline parent by 0.0020 primary.",
+    "rollback_plan": "Retain the baseline/DCN incumbent and conclude these coarse positive author/video affinity bins are insufficient; next sequence work would use richer recency or tag-matched positive histories rather than exposure-only DIN.",
+    "feature_sources": [
+      "Training interaction long_view labels, user_id, video_id, author_id, and date from immutable candidate_data via data.load().",
+      "Candidate author_id and video_id from the five baseline fields."
+    ],
+    "feature_transformations": [
+      "For each train user and date, construct author-positive-count bins 0/1/2/3/4+ and exact-video-positive-seen flags from prior calendar days only.",
+      "For validation, freeze each user’s end-of-train positive author counter and positive-video set; append the resulting two categorical fields to baseline encoding.",
+      "Unseen users map to author-count 0 and video-seen 0."
+    ],
+    "leakage_controls": [
+      "Training-row history excludes outcomes from its own calendar day and every later interaction.",
+      "Validation features use no validation interactions or labels—only frozen histories built from train rows.",
+      "All added field vocabularies are fixed constants; baseline categorical vocabulary/duration bucketing remains train-derived.",
+      "No test split is accessed, and prediction order remains data.load() validation order."
+    ]
+  },
+  "success": true,
+  "metrics": {
+    "GAUC": 0.6682038113725538,
+    "nDCG@5": 0.5368154393473161,
+    "primary": 0.6025096253599349,
+    "users": 22377.0,
+    "rows": 124909.0
+  },
+  "error": null,
+  "wall_seconds": 20.48740792274475,
+  "candidate_changed": true,
+  "candidate_fingerprint": "c02b89694b10d0b598c800097ac768e5a1ad75cf240145adf71babc4b9aa9ff7",
+  "seed": 0,
+  "trial_config": {
+    "k": 16,
+    "lr": 0.001,
+    "l2": 1e-06,
+    "epochs": 40,
+    "batch_size": 8192,
+    "patience": 4
+  },
+  "sanity_check": null,
+  "change_summary": {
+    "hunks": 3,
+    "lines_added": 56,
+    "lines_removed": 2,
+    "parent_lines": 146,
+    "is_rewrite": false
+  },
+  "prediction_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_004/.harness/validation_predictions_18db9eef1cec4566ac60ff87993fc6e5_seed_0.csv",
+  "prediction_sha256": "197b716397c7ef56f3c517aadea7cf3ff9b9656c166769e680fb583f0ec70daa",
+  "execution_id": "18db9eef1cec4566ac60ff87993fc6e5",
+  "source_sha256": "fb13eaa2e306628e4e0e39d338abccae8181fffce4cf6c658101c06cdbcf1396",
+  "source_snapshot_path": "/Users/sabithajayakumar/TikTokTechJam_STierCo/experiment_workspace/20260901_012832/trial_004/.harness/executions/18db9eef1cec4566ac60ff87993fc6e5/model.py",
+  "resource_usage": {
+    "cpu_user_seconds": 19.783258999999987,
+    "cpu_system_seconds": 0.27970199999999945,
+    "peak_rss_platform_units": 984547328,
+    "timeout_seconds": 600,
+    "accelerator": "not_measured"
+  },
+  "execution_class": "normal",
+  "execution_grant": {
+    "granted": true,
+    "requested_class": "normal",
+    "granted_class": "normal",
+    "timeout_seconds": 600,
+    "remaining_wall_seconds": 20734.6,
+    "reason": "requested class 'normal' granted at 600s"
+  },
+  "execution_attempted": true
+}
