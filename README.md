@@ -382,6 +382,6 @@ The longer version — how this was built and what broke — is in
 | Member | Contribution |
 |---|---|
 | **Sabitha Jayakumar** | Agent architecture and the implementation — the research loop, search, and documentation. |
-| **Santhosh Kumar** | Harness scaffold, the PyTorch model path, stability evidence, and cross-platform hardening. |
-| **Sriivatsav** | Literature research and the offline method corpus the agent searches and cites. |
-| **Balasubramani Viveka** | Starter-kit integration, baseline reproduction, and training-path fixes. |
+| **Santhosh Kumar** | Harness scaffold, the PyTorch model path, stability evidence, and Agent architecture refinements. |
+| **Sriivatsav** | Literature research and the offline method corpus the agent searches and cites. Agent architecture refinements |
+| **Balasubramani Viveka** | Starter-kit integration, baseline reproduction, and training-path fixes. Agent architecture refinements |
