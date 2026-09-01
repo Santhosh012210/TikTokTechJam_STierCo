@@ -128,6 +128,44 @@ log are not exposed to candidate processes.
 
 ## Harness at a glance
 
+One LangChain session spans the whole diagram below — bootstrap and every experiment share a
+single conversation, so the agent still has the task summary and its own last reflection in
+context at experiment 9. The harness owns every arrow.
+
+```text
+  BOOTSTRAP  (once, deterministic; edits are blocked until it completes)
+    read starter kit -> inspect train/valid view -> search corpus -> reproduce baseline
+                                |
+                                v
+                       one retained task summary
+                                |
+  EXPERIMENT LOOP               v
+    1. harness picks a parent node from the frontier       (UCB, noise-scaled)
+                                |
+                                v
+    2. agent proposes a hypothesis   <--- cites ---   offline BM25 method corpus
+                                |
+                                v
+    3. agent writes model.py  -->  syntax hook  --fail-->  repair (run_model gated)
+                                |  pass
+                                v
+    4. harness runs it in a subprocess, against the train/valid-only data view
+                                |
+                                v
+    5. harness validates metrics, drops any test key, freezes an immutable node
+                                |
+                                v
+    6. agent reflects and names the next direction
+                                |
+                +---------------+----------------+
+                |                                |
+        budget left, no convergence          converged
+        -> back to step 1                    (e = 0.002, N = 3, >= 8 scored variants)
+                                                 |
+                                                 v
+  FINALIZE  multi-seed re-score -> conservative pick (mean - std) -> submission.csv
+```
+
 | Module | Role |
 |---|---|
 | `mle_agent/harness/agent_main.py` | Single-agent run entrypoint — baseline, budgets, convergence, selection, evidence |
