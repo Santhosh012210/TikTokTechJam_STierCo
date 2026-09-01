@@ -11,6 +11,9 @@ reflect before the next experiment — until it converges or runs out of budget.
 
 All agent code is grouped under the local `mle_agent/` namespace. `mle_agent/research_agent/` decides what to investigate and try next, while `mle_agent/harness/` executes those decisions deterministically and records the evidence.
 
+For the narrative version — what inspired this, how it was built, and what broke along the way —
+see **[PROJECT_STORY.md](PROJECT_STORY.md)**.
+
 ---
 
 ## Task
@@ -110,6 +113,7 @@ datasets/                          dataset instructions; downloaded data is giti
 experiment_workspace/              frozen candidate trees/champions; local and gitignored
 artifacts/                          local run evidence plus tracked promoted final submission
 requirements.txt                   Python dependencies for all supported LLM providers
+PROJECT_STORY.md                   submission write-up: inspiration, build, challenges
 ```
 
 Each autonomous run writes disposable trial implementations to
