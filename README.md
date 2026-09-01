@@ -1,16 +1,15 @@
 # TikTokTechJam_STierCo
 
-An **autonomous ML research agent** that tries to beat the official Factorization Machine
-baseline on the [KuaiRand-Pure](https://kuairand.com) within-user ranking benchmark.
+An **autonomous ML research agent** that tries to beat the official baseline on the [KuaiRand-Pure](https://kuairand.com) within-user ranking benchmark.
 
-It runs one persistent LangChain-backed research session across the complete MLE loop: understand
-the benchmark, inspect train/validation data, research and propose a hypothesis,
-implement a self-contained candidate model, train and score it, repair failures, and
+It runs one persistent LangChain-backed research session across the complete MLE loop:
+1. understand the benchmark
+2. inspect train/validation data
+3. research and propose a hypothesis
+4. implement a self-contained candidate model, train and score it, repair failures, and
 reflect before the next experiment — until it converges or runs out of budget.
 
-All agent code is grouped under the local `mle_agent/` namespace; no installation is
-required. `mle_agent/research_agent/` decides what to investigate and try next, while
-`mle_agent/harness/` executes those decisions deterministically and records the evidence.
+All agent code is grouped under the local `mle_agent/` namespace. `mle_agent/research_agent/` decides what to investigate and try next, while `mle_agent/harness/` executes those decisions deterministically and records the evidence.
 
 ---
 
@@ -31,6 +30,73 @@ Full conventions live in `baseline_kuairand-starter-kit/evaluate.py` and its REA
 
 ---
 
+## Results
+
+One autonomous run (`20260901_012832`) produced the submitted model. It stopped on the
+convergence rule rather than on budget at ~21 minutes wall clock, 2.84M input / 29.6K output tokens.
+
+**Winning candidate** — a DCN-V2 (embedding dim 16, 2 cross layers, 96-unit deep tower,
+AdamW, early stopping on validation primary) over the starter-kit fields plus one
+**hour-of-day context field** derived from the log's `hourmin` column, with its vocabulary
+fitted on train only. The hour field is the reason it can help: it varies *within* a user's
+impression list, so unlike the static user fields the organisers already measured as flat, it
+can change intra-user order.
+
+| Validation metric | Official FM baseline | Final candidate | Delta |
+|---|---:|---:|---:|
+| GAUC | 0.6674 | 0.6706 | **+0.0032** |
+| nDCG@5 | 0.5357 | 0.5376 | **+0.0019** |
+| primary | 0.6016 | 0.6041 | **+0.0025** |
+
+Re-scored on five fixed seeds, the winner holds at primary **0.604293 ± 0.000198** — the
+spread is 0.2x the published FM 5-seed std of 0.0008, so the +0.0025 gain is roughly 3x seed
+noise rather than a lucky draw.
+
+**Hidden test is deliberately unmeasured.** The agent never sees test rows or test metrics;
+the trusted finalizer generated row-aligned predictions (170,588 rows, format and alignment
+validated) without scoring them. The published FM hidden-test primary is 0.5946; whether we
+beat it is for the organisers' evaluation to say, and we do not claim it here.
+
+Everything above is reproduced from tracked evidence in `artifacts/final/` — `model.py`
+(the exact frozen source), `metrics.json`, `submission.csv`, `final-report.md`, the resolved
+`requirements.lock.txt`, and the complete per-iteration run log under `artifacts/final/run/`.
+
+### Reproducing the reported result
+
+Two levels, depending on how much you want to re-derive.
+
+**Re-score the submitted model** (deterministic, ~minutes; needs the dataset and the install
+from *Setup and run* below):
+
+```bash
+python artifacts/final/model.py \
+  --data_dir datasets/KuaiRand-Pure/data \
+  --seed 0 \
+  --prediction-path valid_preds.csv
+```
+
+It prints the validation primary it reached; that should be 0.6041 for seed 0, and the five
+values listed in `artifacts/final/final-report.md` for seeds 0–4. The frozen file's built-in
+defaults are the exact promoted config (also recorded as `source_trial_config` in
+`artifacts/final/metrics.json`), so no `--trial-config` is needed. It is a frozen run artifact
+and carries an absolute path to this repository's starter kit on line 3 — point that at your
+own checkout if you cloned elsewhere.
+
+**Re-run the autonomous search end to end** (needs an API key; a new run explores its own
+trajectory and will not land on an identical model — the harness is reproducible, the
+research is not):
+
+```bash
+./mle_agent/scripts/test_offline.sh                        # offline checks, no key or data
+python baseline_kuairand-starter-kit/baseline.py \
+  --model fm --data_dir datasets/KuaiRand-Pure/data        # must be within ±0.002 of 0.6016
+./mle_agent/scripts/run_agent_once.sh                      # one-experiment provider smoke run
+TASK_DEFINITION_CONFIRMED=1 ./mle_agent/scripts/run_official.sh
+./mle_agent/scripts/finalize.sh --run-id <run_id> --task-definition-confirmed
+```
+
+---
+
 ## Repository layout
 
 ```
@@ -41,10 +107,9 @@ mle_agent/
   scripts/                         run, verify, recovery-demo, and finalization commands
 baseline_kuairand-starter-kit/     organiser starter kit — read-only reference
 datasets/                          dataset instructions; downloaded data is gitignored
-experiment_workspace/              generated trial code; local and gitignored
-artifacts/                          tracked run evidence, results, reports, and final submission
+experiment_workspace/              frozen candidate trees/champions; local and gitignored
+artifacts/                          local run evidence plus tracked promoted final submission
 requirements.txt                   Python dependencies for all supported LLM providers
-SETUP.md                           full first-time setup guide
 ```
 
 Each autonomous run writes disposable trial implementations to
@@ -63,7 +128,8 @@ log are not exposed to candidate processes.
 |---|---|
 | `mle_agent/harness/agent_main.py` | Single-agent run entrypoint — baseline, budgets, convergence, selection, evidence |
 | `mle_agent/research_agent/agent.py` | Persistent research session, recovery loop, phase-aware memory |
-| `mle_agent/research_agent/experiment_history.py` | Cross-run memory of every scored experiment, including failures |
+| `mle_agent/research_agent/prompts/prior_findings.md` | Reviewed agent-facing knowledge: improvements and scoped negative results |
+| `mle_agent/research_agent/experiment_history.py` | Operational score ledger and exact-fingerprint repeat gate |
 | `mle_agent/harness/memory.py` | Phase-aware context compaction policy |
 | `mle_agent/harness/bootstrap_prefetch.py` | Deterministic bootstrap and source curation |
 | `mle_agent/harness/tool_schemas.py` | Pydantic argument models; the single tool-schema source |
@@ -74,48 +140,96 @@ log are not exposed to candidate processes.
 | `mle_agent/harness/logger.py` + `validator.py` | Strict v2 experiment evidence and validation |
 | `mle_agent/harness/finalize.py` | Trusted final promotion and submission-alignment check |
 
-Convergence rule (from the starter kit's 5-seed variance): ε = 0.002, N = 3 — three
-consecutive iterations with ≤0.002 validation gain means stop.
+Candidate search is an immutable tree: the first four trials branch from baseline across loss,
+features, model, and sequence; later trials choose among the conservative top three with a
+noise-scaled UCB score. Every node freezes source, config, seed, metrics, and parent, and visit/
+reward updates propagate through its lineage. Convergence (ε = 0.002, N = 3) is evaluated over
+the whole top frontier only after at least eight scored variants. Final selection uses multi-seed
+mean minus standard deviation and can never fall through to the latest working file.
 
 ---
 
-## Quick start
+## Setup and run
 
-See **[SETUP.md](SETUP.md)** for the full walkthrough (Windows + Mac/Linux), and
-[datasets/README.md](datasets/README.md) for dataset details. In short:
+Prerequisites: Python 3.10+, internet access for initial package/data downloads, and an API
+key for one audited model provider. Run all commands from the repository root.
+
+### 1. Install
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate                            # .venv\Scripts\Activate.ps1 on Windows
+source .venv/bin/activate                 # Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-cp .env.example .env                                 # then add your API key
+cp .env.example .env
+```
 
-# download KuaiRand-Pure (~300MB) into datasets/KuaiRand-Pure/
+If PowerShell blocks activation, run
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once for your user account.
+
+### 2. Configure a provider
+
+Edit `.env` and uncomment one audited autonomous-runner configuration:
+
+| Provider | `AGENT_MODEL` | API-key variable |
+|---|---|---|
+| OpenAI (recommended) | `openai:gpt-5.6-terra` | `OPENAI_API_KEY` |
+| Anthropic | `anthropic:claude-sonnet-4-5-20250929` | `ANTHROPIC_API_KEY` |
+| Google GenAI | `google_genai:gemini-2.5-pro` | `GOOGLE_API_KEY` |
+
+Only providers and model IDs with audited capabilities and token prices in
+`mle_agent/harness/provider.py` are accepted. The autonomous runner deliberately does not treat
+an arbitrary OpenAI-compatible endpoint as equivalent. The separate legacy comparison runner can
+use the configured OpenAI, Groq, Gemini, and Ollama compatibility endpoints documented in
+`.env.example`. `.env` is gitignored; never commit API keys.
+
+### 3. Download the data
+
+KuaiRand-Pure is about 300 MB and requires no registration:
+
+```bash
 curl -L https://zenodo.org/records/10439422/files/KuaiRand-Pure.tar.gz \
   -o datasets/KuaiRand-Pure.tar.gz
 tar -xzf datasets/KuaiRand-Pure.tar.gz -C datasets
+ls datasets/KuaiRand-Pure/data/*.csv | wc -l        # expect 6
+```
 
-# offline checks + Starter Kit integrity — no API key, no dataset
+Windows download instructions and the expected filenames are in
+[datasets/README.md](datasets/README.md). The archive and extracted CSVs are gitignored.
+
+### 4. Verify and run
+
+```bash
+# offline checks + Starter Kit integrity; no API key or dataset needed
 ./mle_agent/scripts/test_offline.sh
 
-# deterministic syntax/runtime recovery demonstration
+# optional deterministic syntax/runtime recovery demonstration
 ./mle_agent/scripts/demo_recovery.sh
 
-# verify the baseline reproduces (needs the dataset, ~40s)
+# reproduce the official validation baseline; needs the dataset, about 40 seconds
 python baseline_kuairand-starter-kit/baseline.py \
   --model fm --data_dir datasets/KuaiRand-Pure/data
 
-# single-agent dev run (3 experiments, up to 30 min)
-./mle_agent/scripts/run_agent.sh
-
-# one-experiment smoke run (24 bootstrap calls, 16 experiment calls, up to 30 min)
+# one-experiment provider smoke run
 ./mle_agent/scripts/run_agent_once.sh
 
-# optionally tune the finite call caps for a larger development run
-AGENT_MAX_ITER=5 AGENT_MAX_TURNS=20 AGENT_BOOTSTRAP_MAX_TURNS=20 ./mle_agent/scripts/run_agent.sh
+# normal autonomous run: 12 experiments, 2 hours, $6 model-cost ceiling
+./mle_agent/scripts/run_agent.sh
 
-# official-budget run after smoke verification and metric confirmation
+# short development run: 3 experiments, up to 30 minutes
+./mle_agent/scripts/run_agent_dev.sh
+
+# official-budget run after the smoke run and baseline check succeed
 TASK_DEFINITION_CONFIRMED=1 ./mle_agent/scripts/run_official.sh
+```
+
+The reproduced validation primary should be within ±0.002 of `0.6016`; do not start an official
+run if it is not. The normal profile can reach the eight scored variants required before frontier
+convergence is allowed and enables bounded quota recovery. Its $6 ceiling, like every profile
+budget, can be adjusted with environment variables, for example:
+
+```bash
+AGENT_MAX_ITER=10 AGENT_MAX_RUN_COST_USD=4.00 AGENT_MAX_TURNS=20 \
+  ./mle_agent/scripts/run_agent.sh
 ```
 
 Before experiment 1, the harness completes a deterministic bootstrap phase in Python. It discovers the
@@ -128,7 +242,9 @@ for all 13 static fields. The harness blocks edits until this bootstrap is compl
 baseline result then stay in the same conversation for every later experiment. Bootstrap defaults
 to 24 model calls and each experiment defaults to 16. Both values must remain positive; exhausting a
 cap ends that phase with an explicit evidence event while preserving completed tools and metrics.
-Provider-quota recovery is also bounded to three automatic resumes per invocation after approval.
+Provider-quota recovery is bounded to three automatic resumes per invocation. Official unattended
+runs pre-authorize those bounded resumes; development runs can opt in with
+`AGENT_AUTO_RESUME_QUOTA=1`.
 Each quota wait is capped at five minutes; exhausting the resume limit stops the run as
 `provider_unavailable` instead of starting another experiment against the same unavailable provider.
 
@@ -148,10 +264,9 @@ show their exact specifiers and justification and wait for `y/n`. URLs, extras, 
 pip flags, source distributions, system installs, and `--user` installs are rejected. Every request
 and outcome is logged, and the resolved environment is written to `environment/requirements.lock.txt`.
 
-When Gemini returns a real quota/rate-limit response, an interactive run asks once whether
-to resume after reset. Choosing `y` waits for the provider-advertised retry interval and
-automatically resumes the same session. Later quota pauses in that run need no further
-human confirmation.
+When a provider returns a real quota/rate-limit response, an opted-in run waits up to five minutes
+and resumes the same retained session. The hard resume count and wall deadline prevent an
+unattended retry loop from running forever.
 
 ---
 
@@ -184,8 +299,9 @@ store, so any passage cited in a run log can be reproduced exactly. See
 
 Each schema-v2 experiment row records the hypothesis, reasoning, exact diff, metrics,
 execution attempts, errors, recovery outcomes, reflection, next direction, tokens, wall
-time, and intervention flag. Run summaries add the explicit stop reason, convergence
-history, per-metric deltas, provider, GPU-hours, and validation-best candidate.
+time, and intervention flag. Run summaries add the explicit stop reason, full frontier and lineage
+statistics, conservative convergence history, per-metric deltas, provider cost, GPU-hours, and
+the frozen winning bundle.
 
 `./mle_agent/scripts/demo_recovery.sh` reproducibly drives the real agent tool
 loop through an invalid save, a blocked execution, a runtime traceback, and a successful
@@ -201,6 +317,63 @@ its frozen validation-best candidate with:
   --task-definition-confirmed
 ```
 
-The confirmation flag is deliberate because the supplied prose conflicts with the
+The finalizer verifies the frozen source/config/seed manifest, reproduces the recorded validation
+metrics exactly, and only then creates the hidden-split submission. The confirmation flag is
+deliberate because the supplied prose conflicts with the
 checked-in Starter Kit about the label and metrics. The trusted finalizer generates test
 predictions, runs `submit.py --check` for schema/alignment, and never scores hidden labels.
+
+---
+
+## Reflection: limitations and what we would improve
+
+**The honest size of the win.** +0.0025 validation primary is a real gain — about 3x the
+published seed noise, stable across five seeds — but it is small, and it is a *validation*
+gain. Across experiments we selected repeatedly against the same validation window, so
+some of it is selection bias; the hidden-test transfer is unverified by design. We would not
+describe this as having solved the benchmark, and the oracle ceiling (0.8645) says most of the
+headroom is still there.
+
+**The search stopped early, and the convergence rule let it.** The run declared convergence 
+due to ε = 0.002 with N = 3 is derived from seed variance and is defensible, but it means any genuinely different architecture whose *first* untuned attempt lands within noise gets read as "no gain" and the branch dies. Most of the 19-method corpus — sequence models (SASRec, DIN, SIM), multi-task heads (ESMM, MMoE, PLE), listwise/LambdaRank losses, GBDT ranking — got at most one shot each, at hand-picked hyperparameters. A good idea can lose to a bad learning rate here, and did at least once.
+
+**Scoring during search is single-seed.** Only the final winner is re-scored on five seeds.
+Every intermediate keep/revert decision therefore runs at roughly the noise floor, which is
+exactly the failure mode the project notes warn about. 
+
+**The agent's knowledge is a frozen snapshot.** Retrieval is offline BM25 over 19 hand-written
+method cards. That buys determinism and reproducible citations, and it costs novelty: the agent
+cannot read a paper published after the corpus was written, and it is anchored toward the
+methods we chose to include.
+
+**Budgets bind.** 16 turns per experiment caps how long a candidate can be debugged before it is
+abandoned. A harder architecture is more likely to be dropped for a fixable bug than an easy one is.
+
+**With more time, in priority order:**
+
+1. **Multi-seed or sequential-test scoring inside the search loop**, not just at the end — so
+   keep/revert decisions stop being made at noise level. This is the single highest-value fix.
+2. **A second held-out validation window** carved from the training range, used only to confirm
+   the final pick, to measure how much of the gain is selection bias.
+3. **A short automatic hyperparameter pass on any candidate that lands near the incumbent**,
+   so architectures are compared at a fair configuration instead of a first guess.
+4. **Parallel trial execution.** Trials are independent and cheap (~2 min each); running four at
+   once turns a 9-experiment run into a 36-experiment one for the same wall clock.
+5. **Cross-run frontier memory** — today each run re-derives the search from the baseline. Seeding
+   a new run with the previous run's frozen frontier compounds progress across runs.
+6. **Live literature retrieval** behind the same citation discipline, so the corpus stops being a
+   ceiling on what the agent can propose.
+7. **Push into the ranking-loss and sequence directions properly** — within-user listwise softmax
+   and a short user-history encoder are the two places the benchmark's structure most obviously
+   rewards, and neither got a fair trial.
+
+---
+
+## Team member contributions
+
+| Member | Contribution |
+|---|---|
+| **Sabitha Jayakumar** | Agent architecture and the implementation — the research loop, search, and documentation. |
+| **Santhosh Kumar** | Harness scaffold, the PyTorch model path, stability evidence, and cross-platform hardening. |
+| **Sriivatsav** | Literature research and the offline method corpus the agent searches and cites. |
+| **Balasubramani Viveka** | Starter-kit integration, baseline reproduction, and training-path fixes. |
